@@ -9,82 +9,75 @@ import {
   RefreshControl,
   TextInput,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getAllUsers, deleteUser, changeUserRole } from '../services/userService';
+import { updateDoc, doc } from 'firebase/firestore';
+import { firestore } from '../config/firebase';
 
 const AdminUsersScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [users, setUsers] = useState([
-    {
-      id: '1',
-      email: 'student1@university.edu.ua',
-      faculty: 'Факультет інформаційних технологій',
-      specialty: "Комп'ютерні науки",
-      group: 'КН-31',
-      status: 'active',
-      createdAt: '2023-05-10'
-    },
-    {
-      id: '2',
-      email: 'student2@university.edu.ua',
-      faculty: 'Факультет інформаційних технологій',
-      specialty: 'Інженерія програмного забезпечення',
-      group: 'ІПЗ-21',
-      status: 'active',
-      createdAt: '2023-05-12'
-    },
-    {
-      id: '3',
-      email: 'student3@university.edu.ua',
-      faculty: 'Факультет економіки',
-      specialty: 'Маркетинг',
-      group: 'МК-41',
-      status: 'blocked',
-      createdAt: '2023-05-08'
-    },
-    {
-      id: '4',
-      email: 'student4@university.edu.ua',
-      faculty: 'Факультет права',
-      specialty: 'Право',
-      group: 'П-11',
-      status: 'active',
-      createdAt: '2023-05-15'
-    },
-    {
-      id: '5',
-      email: 'student5@university.edu.ua',
-      faculty: 'Факультет інформаційних технологій',
-      specialty: 'Кібербезпека',
-      group: 'КБ-21',
-      status: 'inactive',
-      createdAt: '2023-04-25'
-    }
-  ]);
+  const [users, setUsers] = useState([]);
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
+
+  useEffect(() => {
+    loadUsers();
+  }, []);
 
   useEffect(() => {
     filterUsers();
   }, [users, activeFilter, searchQuery]);
 
+  const loadUsers = async () => {
+    try {
+      setLoading(true);
+      const usersData = await getAllUsers();
+      
+      const sortedUsers = usersData.sort((a, b) => {
+        const dateA = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+        const dateB = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+        return dateB - dateA;
+      });
+      
+      setUsers(sortedUsers);
+    } catch (error) {
+      console.error('Помилка завантаження користувачів:', error);
+      Alert.alert('Помилка', 'Не вдалося завантажити список користувачів');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filterUsers = () => {
     let filtered = [...users];
     
-    // Фільтрація за статусом
     if (activeFilter !== 'all') {
-      filtered = filtered.filter(user => user.status === activeFilter);
+      if (activeFilter === 'active') {
+        filtered = filtered.filter(user => user.isActive !== false && user.role !== 'blocked');
+      } else if (activeFilter === 'blocked') {
+        filtered = filtered.filter(user => user.role === 'blocked' || user.isActive === false);
+      } else if (activeFilter === 'inactive') {
+        filtered = filtered.filter(user => !user.firstName || !user.lastName || !user.faculty);
+      } else if (activeFilter === 'admin') {
+        filtered = filtered.filter(user => user.role === 'admin');
+      }
     }
     
-    // Фільтрація за пошуковим запитом
     if (searchQuery) {
+      const query = searchQuery.toLowerCase();
       filtered = filtered.filter(user => 
-        user.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.faculty.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.specialty.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        user.group.toLowerCase().includes(searchQuery.toLowerCase())
+        (user.email && user.email.toLowerCase().includes(query)) ||
+        (user.firstName && user.firstName.toLowerCase().includes(query)) ||
+        (user.lastName && user.lastName.toLowerCase().includes(query)) ||
+        (user.faculty && user.faculty.toLowerCase().includes(query)) ||
+        (user.specialty && user.specialty.toLowerCase().includes(query)) ||
+        (user.group && user.group.toLowerCase().includes(query)) ||
+        (user.studentId && user.studentId.toLowerCase().includes(query))
       );
     }
     
@@ -93,43 +86,59 @@ const AdminUsersScreen = ({ navigation }) => {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    
-    // Симулюємо оновлення даних
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
+    await loadUsers();
+    setRefreshing(false);
   };
 
-  const handleBlockUser = (user) => {
+  const handleBlockUser = async (user) => {
+    const isBlocked = user.role === 'blocked' || user.isActive === false;
+    const action = isBlocked ? 'розблокувати' : 'заблокувати';
+    
     Alert.alert(
-      'Блокування користувача',
-      `Ви впевнені, що хочете ${user.status === 'blocked' ? 'розблокувати' : 'заблокувати'} користувача ${user.email}?`,
+      `${isBlocked ? 'Розблокування' : 'Блокування'} користувача`,
+      `Ви впевнені, що хочете ${action} користувача ${user.email}?`,
       [
         {
           text: 'Скасувати',
           style: 'cancel'
         },
         {
-          text: user.status === 'blocked' ? 'Розблокувати' : 'Заблокувати',
-          style: user.status === 'blocked' ? 'default' : 'destructive',
-          onPress: () => {
-            // Змінюємо статус користувача
-            setUsers(prev => prev.map(item => 
-              item.id === user.id 
-                ? { ...item, status: item.status === 'blocked' ? 'active' : 'blocked' } 
-                : item
-            ));
-            Alert.alert('Успіх', `Користувача ${user.status === 'blocked' ? 'розблоковано' : 'заблоковано'}`);
+          text: isBlocked ? 'Розблокувати' : 'Заблокувати',
+          style: isBlocked ? 'default' : 'destructive',
+          onPress: async () => {
+            try {
+              const userRef = doc(firestore, 'users', user.id);
+              
+              if (isBlocked) {
+                await updateDoc(userRef, {
+                  role: 'student',
+                  isActive: true,
+                  updatedAt: new Date()
+                });
+              } else {
+                await updateDoc(userRef, {
+                  role: 'blocked',
+                  isActive: false,
+                  updatedAt: new Date()
+                });
+              }
+              
+              Alert.alert('Успіх', `Користувача ${action}о`);
+              await loadUsers(); // Перезавантажуємо список
+            } catch (error) {
+              console.error(`Помилка ${action}ння користувача:`, error);
+              Alert.alert('Помилка', `Не вдалося ${action} користувача`);
+            }
           }
         }
       ]
     );
   };
 
-  const handleDeleteUser = (user) => {
+  const handleDeleteUser = async (user) => {
     Alert.alert(
       'Видалення користувача',
-      `Ви впевнені, що хочете видалити користувача ${user.email}?`,
+      `Ви впевнені, що хочете видалити користувача ${user.email}?\n\nЦя дія незворотна і видалить всі дані користувача, включаючи результати тестів.`,
       [
         {
           text: 'Скасувати',
@@ -138,14 +147,102 @@ const AdminUsersScreen = ({ navigation }) => {
         {
           text: 'Видалити',
           style: 'destructive',
-          onPress: () => {
-            // Видаляємо користувача зі списку
-            setUsers(prev => prev.filter(item => item.id !== user.id));
-            Alert.alert('Успіх', 'Користувача успішно видалено');
+          onPress: async () => {
+            try {
+              await deleteUser(user.id);
+              Alert.alert('Успіх', 'Користувача успішно видалено');
+              await loadUsers(); // Перезавантажуємо список
+            } catch (error) {
+              console.error('Помилка видалення користувача:', error);
+              Alert.alert('Помилка', 'Не вдалося видалити користувача');
+            }
           }
         }
       ]
     );
+  };
+
+  const handleMakeAdmin = async (user) => {
+    Alert.alert(
+      'Надання прав адміністратора',
+      `Ви впевнені, що хочете надати права адміністратора користувачу ${user.email}?`,
+      [
+        {
+          text: 'Скасувати',
+          style: 'cancel'
+        },
+        {
+          text: 'Надати права',
+          onPress: async () => {
+            try {
+              await changeUserRole(user.id, 'admin');
+              Alert.alert('Успіх', 'Користувачу надано права адміністратора');
+              await loadUsers(); // Перезавантажуємо список
+            } catch (error) {
+              console.error('Помилка надання прав адміністратора:', error);
+              Alert.alert('Помилка', 'Не вдалося надати права адміністратора');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleRemoveAdmin = async (user) => {
+    Alert.alert(
+      'Видалення прав адміністратора',
+      `Ви впевнені, що хочете видалити права адміністратора у користувача ${user.email}?`,
+      [
+        {
+          text: 'Скасувати',
+          style: 'cancel'
+        },
+        {
+          text: 'Видалити права',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await changeUserRole(user.id, 'student');
+              Alert.alert('Успіх', 'Права адміністратора видалено');
+              await loadUsers(); // Перезавантажуємо список
+            } catch (error) {
+              console.error('Помилка видалення прав адміністратора:', error);
+              Alert.alert('Помилка', 'Не вдалося видалити права адміністратора');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const getUserStatus = (user) => {
+    if (user.role === 'admin') {
+      return { color: '#9C27B0', text: 'Адміністратор' };
+    } else if (user.role === 'blocked' || user.isActive === false) {
+      return { color: '#DB4437', text: 'Заблокований' };
+    } else if (!user.firstName || !user.lastName || !user.faculty) {
+      return { color: '#F4B400', text: 'Неповний профіль' };
+    } else {
+      return { color: '#0F9D58', text: 'Активний' };
+    }
+  };
+
+  const formatDate = (date) => {
+    if (!date) return 'Невідомо';
+    
+    try {
+      const dateObj = date.toDate ? date.toDate() : new Date(date);
+      return dateObj.toLocaleDateString('uk-UA');
+    } catch (error) {
+      return 'Невідомо';
+    }
+  };
+
+  const getUserDisplayName = (user) => {
+    if (user.firstName && user.lastName) {
+      return `${user.firstName} ${user.lastName}`;
+    }
+    return user.email;
   };
 
   const renderFilterButton = (filter, label, icon, color) => (
@@ -174,66 +271,89 @@ const AdminUsersScreen = ({ navigation }) => {
   );
 
   const renderUserItem = ({ item }) => {
-    let statusColor, statusText;
-    
-    switch(item.status) {
-      case 'active':
-        statusColor = '#0F9D58';
-        statusText = 'Активний';
-        break;
-      case 'blocked':
-        statusColor = '#DB4437';
-        statusText = 'Заблокований';
-        break;
-      case 'inactive':
-        statusColor = '#F4B400';
-        statusText = 'Неактивний';
-        break;
-      default:
-        statusColor = '#666';
-        statusText = 'Невідомо';
-    }
+    const status = getUserStatus(item);
+    const displayName = getUserDisplayName(item);
+    const isBlocked = item.role === 'blocked' || item.isActive === false;
+    const isAdmin = item.role === 'admin';
     
     return (
       <View style={styles.userItem}>
         <View style={styles.userHeader}>
-          <Text style={styles.userEmail}>{item.email}</Text>
-          <View style={[styles.userStatusBadge, { backgroundColor: statusColor + '20' }]}>
-            <Text style={[styles.userStatusBadgeText, { color: statusColor }]}>
-              {statusText}
+          <View style={styles.userMainInfo}>
+            <Text style={styles.userDisplayName}>{displayName}</Text>
+            <Text style={styles.userEmail}>{item.email}</Text>
+          </View>
+          <View style={[styles.userStatusBadge, { backgroundColor: status.color + '20' }]}>
+            <Text style={[styles.userStatusBadgeText, { color: status.color }]}>
+              {status.text}
             </Text>
           </View>
         </View>
         
         <View style={styles.userInfo}>
-          <Text style={styles.userInfoText}>Факультет: {item.faculty}</Text>
-          <Text style={styles.userInfoText}>Спеціальність: {item.specialty}</Text>
-          <Text style={styles.userInfoText}>Група: {item.group}</Text>
-          <Text style={styles.userInfoDate}>Зареєстровано: {item.createdAt}</Text>
+          {item.studentId && (
+            <Text style={styles.userInfoText}>ID студента: {item.studentId}</Text>
+          )}
+          {item.faculty && (
+            <Text style={styles.userInfoText}>Факультет: {item.faculty}</Text>
+          )}
+          {item.specialty && (
+            <Text style={styles.userInfoText}>Спеціальність: {item.specialty}</Text>
+          )}
+          {item.group && (
+            <Text style={styles.userInfoText}>Група: {item.group}</Text>
+          )}
+          <Text style={styles.userInfoDate}>
+            Зареєстровано: {formatDate(item.createdAt)}
+          </Text>
         </View>
         
         <View style={styles.userActions}>
-          <TouchableOpacity 
-            style={[
-              styles.actionButton, 
-              item.status === 'blocked' ? styles.unblockButton : styles.blockButton
-            ]}
-            onPress={() => handleBlockUser(item)}
-          >
-            <Ionicons 
-              name={item.status === 'blocked' ? 'checkmark-circle-outline' : 'ban-outline'} 
-              size={20} 
-              color={item.status === 'blocked' ? '#0F9D58' : '#F4B400'} 
-            />
-            <Text 
-              style={[
-                styles.actionButtonText, 
-                { color: item.status === 'blocked' ? '#0F9D58' : '#F4B400' }
-              ]}
+          {!isAdmin ? (
+            <>
+              <TouchableOpacity 
+                style={[
+                  styles.actionButton, 
+                  isBlocked ? styles.unblockButton : styles.blockButton
+                ]}
+                onPress={() => handleBlockUser(item)}
+              >
+                <Ionicons 
+                  name={isBlocked ? 'checkmark-circle-outline' : 'ban-outline'} 
+                  size={20} 
+                  color={isBlocked ? '#0F9D58' : '#F4B400'} 
+                />
+                <Text 
+                  style={[
+                    styles.actionButtonText, 
+                    { color: isBlocked ? '#0F9D58' : '#F4B400' }
+                  ]}
+                >
+                  {isBlocked ? 'Розблокувати' : 'Заблокувати'}
+                </Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={[styles.actionButton, styles.adminButton]}
+                onPress={() => handleMakeAdmin(item)}
+              >
+                <Ionicons name="shield-outline" size={20} color="#9C27B0" />
+                <Text style={[styles.actionButtonText, { color: '#9C27B0' }]}>
+                  Зробити адміном
+                </Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            <TouchableOpacity 
+              style={[styles.actionButton, styles.removeAdminButton]}
+              onPress={() => handleRemoveAdmin(item)}
             >
-              {item.status === 'blocked' ? 'Розблокувати' : 'Заблокувати'}
-            </Text>
-          </TouchableOpacity>
+              <Ionicons name="shield-off-outline" size={20} color="#FF6D01" />
+              <Text style={[styles.actionButtonText, { color: '#FF6D01' }]}>
+                Видалити права адміна
+              </Text>
+            </TouchableOpacity>
+          )}
           
           <TouchableOpacity 
             style={[styles.actionButton, styles.deleteButton]}
@@ -247,6 +367,28 @@ const AdminUsersScreen = ({ navigation }) => {
     );
   };
 
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Керування користувачами</Text>
+          <View style={styles.headerRight} />
+        </View>
+        
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4285F4" />
+          <Text style={styles.loadingText}>Завантаження користувачів...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -257,7 +399,9 @@ const AdminUsersScreen = ({ navigation }) => {
           <Ionicons name="arrow-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Керування користувачами</Text>
-        <View style={styles.headerRight} />
+        <View style={styles.headerRight}>
+          <Text style={styles.userCount}>{filteredUsers.length}</Text>
+        </View>
       </View>
 
       <View style={styles.searchContainer}>
@@ -287,7 +431,8 @@ const AdminUsersScreen = ({ navigation }) => {
           {renderFilterButton('all', 'Усі', 'people', '#666')}
           {renderFilterButton('active', 'Активні', 'checkmark-circle', '#0F9D58')}
           {renderFilterButton('blocked', 'Заблоковані', 'ban', '#DB4437')}
-          {renderFilterButton('inactive', 'Неактивні', 'alert-circle', '#F4B400')}
+          {renderFilterButton('inactive', 'Неповні профілі', 'alert-circle', '#F4B400')}
+          {renderFilterButton('admin', 'Адміністратори', 'shield', '#9C27B0')}
         </ScrollView>
       </View>
 
@@ -313,6 +458,11 @@ const AdminUsersScreen = ({ navigation }) => {
                 ? 'Немає користувачів, що відповідають пошуку' 
                 : 'Немає доступних користувачів у цій категорії'}
             </Text>
+            {!searchQuery && activeFilter === 'all' && (
+              <Text style={styles.emptySubtext}>
+                Користувачі з'являться тут після реєстрації в системі
+              </Text>
+            )}
           </View>
         }
       />
@@ -342,6 +492,26 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     width: 34,
+    alignItems: 'center',
+  },
+  userCount: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -409,17 +579,25 @@ const styles = StyleSheet.create({
   userHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 10,
   },
-  userEmail: {
-    fontSize: 16,
-    fontWeight: 'bold',
+  userMainInfo: {
     flex: 1,
     marginRight: 10,
   },
+  userDisplayName: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 2,
+  },
+  userEmail: {
+    fontSize: 14,
+    color: '#666',
+  },
   userStatusBadge: {
-    paddingVertical: 3,
+    paddingVertical: 4,
     paddingHorizontal: 8,
     borderRadius: 12,
   },
@@ -433,6 +611,7 @@ const styles = StyleSheet.create({
   userInfoText: {
     color: '#666',
     marginBottom: 4,
+    fontSize: 14,
   },
   userInfoDate: {
     color: '#999',
@@ -441,10 +620,11 @@ const styles = StyleSheet.create({
   },
   userActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     borderTopWidth: 1,
     borderTopColor: '#eee',
     paddingTop: 15,
+    gap: 8,
   },
   actionButton: {
     flexDirection: 'row',
@@ -453,22 +633,27 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     flex: 1,
     justifyContent: 'center',
+    minWidth: '45%',
   },
   blockButton: {
-    marginRight: 5,
     backgroundColor: '#fff8e1',
   },
   unblockButton: {
-    marginRight: 5,
     backgroundColor: '#e8f5e9',
   },
+  adminButton: {
+    backgroundColor: '#f3e5f5',
+  },
+  removeAdminButton: {
+    backgroundColor: '#fff3e0',
+  },
   deleteButton: {
-    marginLeft: 5,
     backgroundColor: '#ffebee',
   },
   actionButtonText: {
     marginLeft: 5,
     fontWeight: '500',
+    fontSize: 12,
   },
   emptyContainer: {
     flex: 1,
@@ -480,6 +665,12 @@ const styles = StyleSheet.create({
     marginTop: 10,
     color: '#999',
     fontSize: 16,
+    textAlign: 'center',
+  },
+  emptySubtext: {
+    marginTop: 5,
+    color: '#ccc',
+    fontSize: 14,
     textAlign: 'center',
   },
 });

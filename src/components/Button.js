@@ -6,21 +6,6 @@ import {
   ActivityIndicator, 
   View 
 } from 'react-native';
-
-/**
- * Компонент кнопки з різними варіантами стилів
- * 
- * @param {Object} props - Властивості компонента
- * @param {string} props.title - Текст кнопки
- * @param {Function} props.onPress - Функція, яка викликається при натисканні
- * @param {string} props.type - Тип кнопки ('primary', 'secondary', 'danger', 'success', 'outline')
- * @param {boolean} props.loading - Чи відображати індикатор завантаження
- * @param {boolean} props.disabled - Чи вимкнена кнопка
- * @param {Object} props.style - Додаткові стилі для кнопки
- * @param {Object} props.textStyle - Додаткові стилі для тексту
- * @param {string} props.icon - Іконка (компонент)
- * @param {string} props.iconPosition - Позиція іконки ('left', 'right')
- */
 const Button = ({ 
   title, 
   onPress, 
@@ -32,7 +17,6 @@ const Button = ({
   icon,
   iconPosition = 'left'
 }) => {
-  // Визначаємо стилі кнопки залежно від типу
   const getButtonStyle = () => {
     switch (type) {
       case 'secondary':
@@ -48,7 +32,6 @@ const Button = ({
     }
   };
 
-  // Визначаємо стилі тексту залежно від типу
   const getTextStyle = () => {
     switch (type) {
       case 'outline':

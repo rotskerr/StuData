@@ -1,130 +1,29 @@
-// Тут буде конфігурація Firebase
-// Для імітації роботи з Firebase, створимо заглушки основних функцій
+// Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+import { initializeAuth, getReactNativePersistence, getAuth } from "firebase/auth";
+import { getFirestore } from "firebase/firestore";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-// Імітація автентифікації
-export const auth = {
-  signInWithEmailAndPassword: async (email, password) => {
-    return new Promise((resolve, reject) => {
-      // Імітація затримки мережі
-      setTimeout(() => {
-        if (email && password) {
-          resolve({ user: { uid: '123456', email } });
-        } else {
-          reject(new Error('Невірний email або пароль'));
-        }
-      }, 1000);
-    });
-  },
-  
-  createUserWithEmailAndPassword: async (email, password) => {
-    return new Promise((resolve, reject) => {
-      setTimeout(() => {
-        if (email && password) {
-          resolve({ user: { uid: '123456', email } });
-        } else {
-          reject(new Error('Помилка при створенні користувача'));
-        }
-      }, 1000);
-    });
-  },
-  
-  signOut: async () => {
-    return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve();
-      }, 500);
-    });
-  },
-  
-  onAuthStateChanged: (callback) => {
-    // Імітація слухача стану автентифікації
-    return () => {}; // Функція для відписки від слухача
-  }
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyCyDZDdBbhVpnE2Oi5AfsE0qwuUlLDLuHk",
+  authDomain: "studata-13d40.firebaseapp.com",
+  projectId: "studata-13d40",
+  storageBucket: "studata-13d40.firebasestorage.app",
+  messagingSenderId: "886376311850",
+  appId: "1:886376311850:web:4ccb3e8ae78aa48a766753",
+  measurementId: "G-ND4SJ0KSSQ"
 };
 
-// Імітація Firestore
-export const firestore = {
-  collection: (collectionName) => {
-    return {
-      doc: (docId) => {
-        return {
-          get: async () => {
-            return {
-              exists: true,
-              data: () => {
-                // Повертаємо різні дані залежно від колекції
-                if (collectionName === 'users') {
-                  return {
-                    email: 'user@university.edu.ua',
-                    faculty: 'Інформаційних технологій',
-                    specialty: 'Комп\'ютерні науки',
-                    group: 'КН-21'
-                  };
-                } else if (collectionName === 'tests') {
-                  return {
-                    title: 'Тест з React Native',
-                    questions: []
-                  };
-                }
-                return {};
-              }
-            };
-          },
-          set: async (data) => {
-            return Promise.resolve();
-          },
-          update: async (data) => {
-            return Promise.resolve();
-          }
-        };
-      },
-      add: async (data) => {
-        return Promise.resolve({ id: '123456' });
-      },
-      where: () => {
-        return {
-          get: async () => {
-            return {
-              docs: [
-                {
-                  id: '1',
-                  data: () => ({
-                    title: 'Тест 1',
-                    description: 'Опис тесту 1'
-                  })
-                },
-                {
-                  id: '2',
-                  data: () => ({
-                    title: 'Тест 2',
-                    description: 'Опис тесту 2'
-                  })
-                }
-              ]
-            };
-          }
-        };
-      }
-    };
-  }
-};
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
-// Імітація Storage
-export const storage = {
-  ref: (path) => {
-    return {
-      put: async (file) => {
-        return Promise.resolve();
-      },
-      getDownloadURL: async () => {
-        return Promise.resolve('https://example.com/image.jpg');
-      }
-    };
-  }
-};
+// Initialize Firebase auth with AsyncStorage persistence for Hermes compatibility
+const auth = initializeAuth(app, {
+  persistence: getReactNativePersistence(AsyncStorage)
+});
 
-export default {
-  auth,
-  firestore,
-  storage
-}; 
+// Initialize Firestore
+const firestore = getFirestore(app);
+
+export { auth, firestore };

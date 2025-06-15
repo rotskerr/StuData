@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -9,98 +9,77 @@ import {
   RefreshControl,
   TextInput,
   ScrollView,
-  SafeAreaView
+  SafeAreaView,
+  ActivityIndicator
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { getAllTests, deleteTest } from '../services/testService';
 
 const AdminTestsScreen = ({ navigation }) => {
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [tests, setTests] = useState([
-    {
-      id: '1',
-      title: 'Основи React Native',
-      type: 'test',
-      questions: 10,
-      status: 'active',
-      createdAt: '2023-05-15'
-    },
-    {
-      id: '2',
-      title: 'Опитування щодо якості навчання',
-      type: 'survey',
-      questions: 5,
-      status: 'active',
-      createdAt: '2023-05-10'
-    },
-    {
-      id: '3',
-      title: 'JavaScript базовий рівень',
-      type: 'test',
-      questions: 15,
-      status: 'active',
-      createdAt: '2023-05-08'
-    },
-    {
-      id: '4',
-      title: 'Алгоритми та структури даних',
-      type: 'test',
-      questions: 20,
-      status: 'draft',
-      createdAt: '2023-05-05'
-    },
-    {
-      id: '5',
-      title: 'Бази даних',
-      type: 'test',
-      questions: 15,
-      status: 'archived',
-      createdAt: '2023-04-28'
-    }
-  ]);
+  const [tests, setTests] = useState([]);
   const [filteredTests, setFilteredTests] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all');
+
+  useEffect(() => {
+    loadTests();
+  }, []);
 
   useEffect(() => {
     filterTests();
   }, [tests, activeFilter, searchQuery]);
 
-  const filterTests = () => {
+  const loadTests = useCallback(async () => {
+    try {
+      setLoading(true);
+      const testsData = await getAllTests();
+      setTests(testsData);
+    } catch (error) {
+      console.error('Помилка завантаження тестів:', error);
+      Alert.alert('Помилка', 'Не вдалося завантажити тести');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const filterTests = useCallback(() => {
     let filtered = [...tests];
     
-    // Фільтрація за статусом
     if (activeFilter !== 'all') {
-      filtered = filtered.filter(test => test.status === activeFilter);
+      if (activeFilter === 'active') {
+        filtered = filtered.filter(test => test.isActive === true);
+      } else if (activeFilter === 'draft') {
+        filtered = filtered.filter(test => test.isActive === false);
+      }
     }
     
-    // Фільтрація за пошуковим запитом
     if (searchQuery) {
       filtered = filtered.filter(test => 
-        test.title.toLowerCase().includes(searchQuery.toLowerCase())
+        test.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        test.description?.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
     
     setFilteredTests(filtered);
-  };
+  }, [tests, activeFilter, searchQuery]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    
-    // Симулюємо оновлення даних
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
+    await loadTests();
+    setRefreshing(false);
+  }, [loadTests]);
 
-  const handleAddTest = () => {
+  const handleAddTest = useCallback(() => {
     navigation.navigate('AdminEditTest', { isNew: true });
-  };
+  }, [navigation]);
 
-  const handleEditTest = (test) => {
+  const handleEditTest = useCallback((test) => {
     navigation.navigate('AdminEditTest', { testId: test.id, isNew: false });
-  };
+  }, [navigation]);
 
-  const handleDeleteTest = (test) => {
+  const handleDeleteTest = useCallback((test) => {
     Alert.alert(
       'Видалення тесту',
       `Ви впевнені, що хочете видалити тест "${test.title}"?`,
@@ -112,15 +91,20 @@ const AdminTestsScreen = ({ navigation }) => {
         {
           text: 'Видалити',
           style: 'destructive',
-          onPress: () => {
-            // Видаляємо тест зі списку
-            setTests(prev => prev.filter(item => item.id !== test.id));
-            Alert.alert('Успіх', 'Тест успішно видалено');
+          onPress: async () => {
+            try {
+              await deleteTest(test.id);
+              Alert.alert('Успіх', 'Тест успішно видалено');
+              await loadTests(); // Перезавантажуємо список
+            } catch (error) {
+              console.error('Помилка видалення тесту:', error);
+              Alert.alert('Помилка', 'Не вдалося видалити тест');
+            }
           }
         }
       ]
     );
-  };
+  }, [loadTests]);
 
   const renderFilterButton = (filter, label, icon, color) => (
     <TouchableOpacity
@@ -148,25 +132,10 @@ const AdminTestsScreen = ({ navigation }) => {
   );
 
   const renderTestItem = ({ item }) => {
-    let statusColor, statusText;
-    
-    switch(item.status) {
-      case 'active':
-        statusColor = '#0F9D58';
-        statusText = 'Активний';
-        break;
-      case 'draft':
-        statusColor = '#F4B400';
-        statusText = 'Чернетка';
-        break;
-      case 'archived':
-        statusColor = '#DB4437';
-        statusText = 'Архівований';
-        break;
-      default:
-        statusColor = '#666';
-        statusText = 'Невідомо';
-    }
+    const isActive = item.isActive;
+    const statusColor = isActive ? '#0F9D58' : '#F4B400';
+    const statusText = isActive ? 'Активний' : 'Неактивний';
+    const questionsCount = item.questions ? item.questions.length : 0;
     
     return (
       <View style={styles.testItem}>
@@ -179,8 +148,15 @@ const AdminTestsScreen = ({ navigation }) => {
           </View>
         </View>
         
+        {item.description && (
+          <Text style={styles.testDescription}>{item.description}</Text>
+        )}
+        
         <View style={styles.testInfo}>
-          <Text style={styles.testInfoText}>Питань: {item.questions}</Text>
+          <Text style={styles.testInfoText}>Питань: {questionsCount}</Text>
+          {item.timeLimit && (
+            <Text style={styles.testInfoText}>Час: {item.timeLimit} хв</Text>
+          )}
           <Text style={[styles.testStatus, { color: statusColor }]}>
             <Ionicons name="ellipse" size={10} color={statusColor} /> {statusText}
           </Text>
@@ -199,13 +175,40 @@ const AdminTestsScreen = ({ navigation }) => {
             style={[styles.actionButton, styles.deleteButton]}
             onPress={() => handleDeleteTest(item)}
           >
-            <Ionicons name="trash-outline" size={20} color="#DB4437" />
-            <Text style={[styles.actionButtonText, { color: '#DB4437' }]}>Видалити</Text>
+            <Ionicons name="trash-outline" size={20} color="#EA4335" />
+            <Text style={[styles.actionButtonText, { color: '#EA4335' }]}>Видалити</Text>
           </TouchableOpacity>
         </View>
       </View>
     );
   };
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <TouchableOpacity 
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>Керування тестами</Text>
+          <TouchableOpacity 
+            style={styles.addButton}
+            onPress={handleAddTest}
+          >
+            <Ionicons name="add" size={24} color="#fff" />
+          </TouchableOpacity>
+        </View>
+        
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4285F4" />
+          <Text style={styles.loadingText}>Завантаження тестів...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -251,8 +254,7 @@ const AdminTestsScreen = ({ navigation }) => {
         >
           {renderFilterButton('all', 'Усі', 'apps', '#666')}
           {renderFilterButton('active', 'Активні', 'checkmark-circle', '#0F9D58')}
-          {renderFilterButton('draft', 'Чернетки', 'document', '#F4B400')}
-          {renderFilterButton('archived', 'Архівовані', 'archive', '#DB4437')}
+          {renderFilterButton('draft', 'Неактивні', 'pause-circle', '#F4B400')}
         </ScrollView>
       </View>
 
@@ -392,6 +394,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
   },
+  testDescription: {
+    color: '#666',
+    fontSize: 14,
+    marginBottom: 10,
+    lineHeight: 20,
+  },
   testInfo: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -438,6 +446,18 @@ const styles = StyleSheet.create({
     padding: 50,
   },
   emptyText: {
+    marginTop: 10,
+    color: '#999',
+    fontSize: 16,
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 50,
+  },
+  loadingText: {
     marginTop: 10,
     color: '#999',
     fontSize: 16,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -9,21 +9,25 @@ import {
   Alert,
   Switch,
   ActivityIndicator,
-  SafeAreaView
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import TestAvailabilitySelector from '../components/TestAvailabilitySelector';
+import { createTest, updateTest, getTestById } from '../services/testService';
 
 const AdminEditTestScreen = ({ route, navigation }) => {
   const { testId, isNew } = route.params || { testId: null, isNew: true };
   const [isLoading, setIsLoading] = useState(!isNew);
   const [isSaving, setIsSaving] = useState(false);
   
-  // Дані тесту
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [testType, setTestType] = useState('test'); // 'test' або 'survey'
   const [timeLimit, setTimeLimit] = useState('30'); // в хвилинах
   const [isActive, setIsActive] = useState(true);
+  const [availability, setAvailability] = useState({ type: 'all' });
   const [questions, setQuestions] = useState([
     {
       id: '1',
@@ -37,90 +41,48 @@ const AdminEditTestScreen = ({ route, navigation }) => {
     }
   ]);
 
-  // Завантаження даних тесту, якщо це редагування
   useEffect(() => {
     if (!isNew && testId) {
       loadTestData();
     }
   }, [isNew, testId]);
 
+  const handleAvailabilityChange = useCallback((availabilityData) => {
+    setAvailability(availabilityData);
+  }, []);
+
   const loadTestData = async () => {
     setIsLoading(true);
     
-    // Симуляція завантаження даних з сервера
-    setTimeout(() => {
-      // Приклад даних тесту
-      if (testId === '1') {
-        setTitle('Основи React Native');
-        setDescription('Тест для перевірки базових знань з React Native');
-        setTestType('test');
-        setTimeLimit('30');
-        setIsActive(true);
-        setQuestions([
-          {
-            id: '1',
-            text: 'Що таке React Native?',
-            type: 'single',
-            options: [
-              { id: '1', text: 'Фреймворк для створення мобільних додатків', isCorrect: true },
-              { id: '2', text: 'Бібліотека для роботи з базами даних', isCorrect: false },
-              { id: '3', text: 'Серверна технологія для обробки запитів', isCorrect: false }
-            ],
-            correctAnswer: ''
-          },
-          {
-            id: '2',
-            text: 'Які компоненти є базовими в React Native?',
-            type: 'multiple',
-            options: [
-              { id: '1', text: 'View', isCorrect: true },
-              { id: '2', text: 'Text', isCorrect: true },
-              { id: '3', text: 'Div', isCorrect: false },
-              { id: '4', text: 'Image', isCorrect: true }
-            ],
-            correctAnswer: ''
-          },
-          {
-            id: '3',
-            text: 'Опишіть, як працює механізм віртуального DOM в React?',
-            type: 'text',
-            options: [],
-            correctAnswer: 'Віртуальний DOM - це легка копія реального DOM, яка дозволяє React ефективно оновлювати інтерфейс.'
-          }
-        ]);
-      } else {
-        // Якщо тест не знайдено, встановлюємо значення за замовчуванням
-        setTitle('');
-        setDescription('');
-        setTestType('test');
-        setTimeLimit('30');
-        setIsActive(true);
-        setQuestions([
-          {
-            id: '1',
-            text: '',
-            type: 'single',
-            options: [
-              { id: '1', text: '', isCorrect: false },
-              { id: '2', text: '', isCorrect: false }
-            ],
-            correctAnswer: ''
-          }
-        ]);
-      }
+    try {
+      const testData = await getTestById(testId);
       
+      if (testData) {
+        setTitle(testData.title || '');
+        setDescription(testData.description || '');
+        setTestType(testData.type || 'test');
+        setTimeLimit(testData.timeLimit?.toString() || '30');
+        setIsActive(testData.isActive !== false);
+        setAvailability(testData.availability || { type: 'all' });
+        
+        if (testData.questions && testData.questions.length > 0) {
+          setQuestions(testData.questions);
+        }
+      }
+    } catch (error) {
+      console.error('Помилка завантаження тесту:', error);
+      Alert.alert('Помилка', 'Не вдалося завантажити дані тесту');
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleSaveTest = async () => {
-    // Перевірка на заповненість обов'язкових полів
     if (!title.trim()) {
       Alert.alert('Помилка', 'Будь ласка, введіть назву тесту');
       return;
     }
 
-    // Перевірка питань
     for (let i = 0; i < questions.length; i++) {
       const question = questions[i];
       if (!question.text.trim()) {
@@ -129,13 +91,11 @@ const AdminEditTestScreen = ({ route, navigation }) => {
       }
 
       if (question.type === 'single' || question.type === 'multiple') {
-        // Перевірка варіантів відповідей
         if (question.options.length < 2) {
           Alert.alert('Помилка', `Питання ${i + 1} повинно мати мінімум 2 варіанти відповіді`);
           return;
         }
 
-        // Перевірка заповненості варіантів
         for (let j = 0; j < question.options.length; j++) {
           if (!question.options[j].text.trim()) {
             Alert.alert('Помилка', `Варіант ${j + 1} питання ${i + 1} не має тексту`);
@@ -143,7 +103,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
           }
         }
 
-        // Перевірка наявності правильної відповіді
         if (question.type === 'single' && !question.options.some(opt => opt.isCorrect)) {
           Alert.alert('Помилка', `Питання ${i + 1} не має правильної відповіді`);
           return;
@@ -161,20 +120,34 @@ const AdminEditTestScreen = ({ route, navigation }) => {
 
     setIsSaving(true);
 
-    // Симуляція збереження даних
-    setTimeout(() => {
+    try {
+      const testData = {
+        title,
+        description,
+        type: testType,
+        timeLimit: parseInt(timeLimit, 10),
+        isActive,
+        availability,
+        questions,
+      };
+      
+      if (isNew) {
+        const newTestId = await createTest(testData);
+        Alert.alert('Успіх', 'Тест успішно створено', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
+      } else {
+        await updateTest(testId, testData);
+        Alert.alert('Успіх', 'Тест успішно оновлено', [
+          { text: 'OK', onPress: () => navigation.goBack() }
+        ]);
+      }
+    } catch (error) {
+      console.error('Помилка збереження тесту:', error);
+      Alert.alert('Помилка', 'Не вдалося зберегти тест');
+    } finally {
       setIsSaving(false);
-      Alert.alert(
-        'Успіх', 
-        isNew ? 'Тест успішно створено' : 'Тест успішно оновлено',
-        [
-          { 
-            text: 'OK', 
-            onPress: () => navigation.goBack() 
-          }
-        ]
-      );
-    }, 1000);
+    }
   };
 
   const addQuestion = () => {
@@ -229,7 +202,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
     setQuestions(
       questions.map(q => {
         if (q.id === questionId) {
-          // Якщо змінюємо тип на текстовий, видаляємо варіанти
           if (type === 'text') {
             return {
               ...q,
@@ -238,7 +210,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
               correctAnswer: ''
             };
           }
-          // Якщо змінюємо тип на одиночний або множинний вибір, додаємо варіанти
           else if (q.type === 'text') {
             return {
               ...q,
@@ -250,7 +221,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
               correctAnswer: ''
             };
           }
-          // Якщо змінюємо між одиночним і множинним, залишаємо варіанти
           return { ...q, type };
         }
         return q;
@@ -313,7 +283,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
     setQuestions(
       questions.map(q => {
         if (q.id === questionId) {
-          // Для одиночного вибору робимо тільки один варіант правильним
           if (q.type === 'single') {
             return {
               ...q,
@@ -322,7 +291,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
               )
             };
           }
-          // Для множинного вибору перемикаємо стан
           else {
             return {
               ...q,
@@ -345,7 +313,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
     );
   };
 
-  // Рендер варіанта відповіді
   const renderOption = (question, option, index) => {
     return (
       <View key={option.id} style={styles.optionContainer}>
@@ -383,7 +350,6 @@ const AdminEditTestScreen = ({ route, navigation }) => {
     );
   };
 
-  // Рендер питання
   const renderQuestion = (question, index) => {
     return (
       <View key={question.id} style={styles.questionContainer}>
@@ -509,83 +475,92 @@ const AdminEditTestScreen = ({ route, navigation }) => {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity 
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>
-          {isNew ? 'Створення тесту' : 'Редагування тесту'}
-        </Text>
-        <TouchableOpacity 
-          style={styles.saveButton}
-          onPress={handleSaveTest}
-          disabled={isSaving}
-        >
-          {isSaving ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Ionicons name="checkmark" size={24} color="#fff" />
-          )}
-        </TouchableOpacity>
-      </View>
+    <SafeAreaView style={styles.safeArea}>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === "ios" ? "padding" : "height"}
+        style={styles.keyboardAvoidingView}
+      >
+        <View style={styles.header}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.headerTitle}>
+            {isNew ? 'Новий тест' : 'Редагування тесту'}
+          </Text>
+          <TouchableOpacity
+            style={[styles.saveButton, isSaving && styles.saveButtonDisabled]}
+            onPress={handleSaveTest}
+            disabled={isSaving}
+          >
+            {isSaving ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <Text style={styles.saveButtonText}>Зберегти</Text>
+            )}
+          </TouchableOpacity>
+        </View>
 
-      <ScrollView style={styles.content}>
-        <View style={styles.formSection}>
-          <Text style={styles.sectionTitle}>Основна інформація</Text>
-          
-          <Text style={styles.inputLabel}>Назва тесту</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Введіть назву тесту"
-            value={title}
-            onChangeText={setTitle}
-          />
-          
-          <Text style={styles.inputLabel}>Опис тесту</Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Введіть опис тесту"
-            value={description}
-            onChangeText={setDescription}
-            multiline
-          />
-          
-          <View style={styles.rowContainer}>
-            <View style={styles.halfWidth}>
-              <Text style={styles.inputLabel}>Тип</Text>
-              <View style={styles.pickerContainer}>
+        <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Загальна інформація</Text>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Назва тесту:</Text>
+              <TextInput
+                style={styles.textInput}
+                value={title}
+                onChangeText={setTitle}
+                placeholder="Введіть назву тесту"
+              />
+            </View>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Опис:</Text>
+              <TextInput
+                style={[styles.textInput, styles.textAreaInput]}
+                value={description}
+                onChangeText={setDescription}
+                placeholder="Введіть опис тесту"
+                multiline
+                numberOfLines={4}
+              />
+            </View>
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Тип:</Text>
+              <View style={styles.typeSelector}>
                 <TouchableOpacity
                   style={[
-                    styles.pickerButton,
-                    testType === 'test' && styles.pickerButtonSelected
+                    styles.typeButton,
+                    styles.typeSelectorButton,
+                    testType === 'test' && styles.typeButtonActive
                   ]}
                   onPress={() => setTestType('test')}
                 >
-                  <Text 
+                  <Text
                     style={[
-                      styles.pickerButtonText,
-                      testType === 'test' && styles.pickerButtonTextSelected
+                      styles.typeButtonText,
+                      testType === 'test' && styles.typeButtonTextActive
                     ]}
                   >
                     Тест
                   </Text>
                 </TouchableOpacity>
-                
                 <TouchableOpacity
                   style={[
-                    styles.pickerButton,
-                    testType === 'survey' && styles.pickerButtonSelected
+                    styles.typeButton,
+                    styles.typeSelectorButton,
+                    testType === 'survey' && styles.typeButtonActive
                   ]}
                   onPress={() => setTestType('survey')}
                 >
-                  <Text 
+                  <Text
                     style={[
-                      styles.pickerButtonText,
-                      testType === 'survey' && styles.pickerButtonTextSelected
+                      styles.typeButtonText,
+                      testType === 'survey' && styles.typeButtonTextActive
                     ]}
                   >
                     Опитування
@@ -594,56 +569,80 @@ const AdminEditTestScreen = ({ route, navigation }) => {
               </View>
             </View>
             
-            <View style={styles.halfWidth}>
-              <Text style={styles.inputLabel}>Час (хв)</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="30"
-                value={timeLimit}
-                onChangeText={setTimeLimit}
-                keyboardType="numeric"
+            {testType === 'test' && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Обмеження часу (хв):</Text>
+                <TextInput
+                  style={[styles.textInput, styles.numberInput]}
+                  value={timeLimit}
+                  onChangeText={setTimeLimit}
+                  keyboardType="numeric"
+                  placeholder="30"
+                />
+              </View>
+            )}
+            
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Активний:</Text>
+              <Switch
+                value={isActive}
+                onValueChange={setIsActive}
+                trackColor={{ false: '#d1d1d1', true: '#4285F4' }}
+                thumbColor={isActive ? '#fff' : '#f4f3f4'}
+                ios_backgroundColor="#d1d1d1"
+              />
+            </View>
+            
+            {/* Компонент вибору доступності тесту */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Доступність:</Text>
+              <TestAvailabilitySelector 
+                onAvailabilityChange={handleAvailabilityChange}
+                initialValue={availability}
               />
             </View>
           </View>
-          
-          <View style={styles.switchContainer}>
-            <Text style={styles.switchLabel}>Активний</Text>
-            <Switch
-              value={isActive}
-              onValueChange={setIsActive}
-              trackColor={{ false: '#ccc', true: '#4285F460' }}
-              thumbColor={isActive ? '#4285F4' : '#f4f3f4'}
-            />
+
+          <View style={styles.formSection}>
+            <Text style={styles.sectionTitle}>Питання</Text>
+            
+            {questions.map((question, index) => renderQuestion(question, index))}
+            
+            <TouchableOpacity
+              style={styles.addQuestionButton}
+              onPress={addQuestion}
+            >
+              <Ionicons name="add-circle" size={20} color="#4285F4" />
+              <Text style={styles.addQuestionButtonText}>Додати питання</Text>
+            </TouchableOpacity>
           </View>
-        </View>
-        
-        <View style={styles.formSection}>
-          <Text style={styles.sectionTitle}>Питання</Text>
-          
-          {questions.map((question, index) => renderQuestion(question, index))}
-          
-          <TouchableOpacity
-            style={styles.addQuestionButton}
-            onPress={addQuestion}
-          >
-            <Ionicons name="add-circle" size={24} color="#4285F4" />
-            <Text style={styles.addQuestionText}>Додати питання</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#4285F4',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#f5f5f5',
+  },
+  contentContainer: {
+    padding: 15,
+    paddingBottom: 50,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#fff',
   },
   loadingText: {
     marginTop: 10,
@@ -652,7 +651,7 @@ const styles = StyleSheet.create({
   },
   header: {
     backgroundColor: '#4285F4',
-    padding: 20,
+    padding: 15,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -666,15 +665,22 @@ const styles = StyleSheet.create({
     padding: 5,
   },
   saveButton: {
-    padding: 5,
+    backgroundColor: '#34A853',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
   },
-  content: {
-    flex: 1,
-    padding: 15,
+  saveButtonDisabled: {
+    backgroundColor: '#d1d1d1',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   formSection: {
     marginBottom: 20,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#fff',
     borderRadius: 10,
     padding: 15,
     shadowColor: '#000',
@@ -689,64 +695,61 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     color: '#333',
   },
+  inputGroup: {
+    marginBottom: 15,
+  },
   inputLabel: {
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 5,
     color: '#666',
   },
-  input: {
+  textInput: {
     backgroundColor: '#fff',
     borderWidth: 1,
     borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
     fontSize: 16,
-    marginBottom: 15,
   },
-  textArea: {
+  textAreaInput: {
     height: 100,
     textAlignVertical: 'top',
   },
-  rowContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  numberInput: {
+    width: '100%',
   },
-  halfWidth: {
-    width: '48%',
-  },
-  pickerContainer: {
+  typeSelector: {
     flexDirection: 'row',
     marginBottom: 15,
-  },
-  pickerButton: {
-    flex: 1,
-    padding: 12,
-    alignItems: 'center',
-    backgroundColor: '#fff',
+    borderRadius: 8,
+    overflow: 'hidden',
     borderWidth: 1,
     borderColor: '#ddd',
   },
-  pickerButtonSelected: {
-    backgroundColor: '#4285F4',
-    borderColor: '#4285F4',
+  typeSelectorButton: {
+    borderWidth: 0,
+    borderRadius: 0,
+    paddingVertical: 12,
   },
-  pickerButtonText: {
+  typeButton: {
+    flex: 1,
+    padding: 12,
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    marginRight: 8,
+    marginBottom: 8,
+  },
+  typeButtonActive: {
+    backgroundColor: '#4285F4',
+  },
+  typeButtonText: {
     color: '#666',
   },
-  pickerButtonTextSelected: {
+  typeButtonTextActive: {
     color: '#fff',
     fontWeight: 'bold',
-  },
-  switchContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 15,
-  },
-  switchLabel: {
-    fontSize: 16,
-    color: '#666',
   },
   questionContainer: {
     backgroundColor: '#fff',
@@ -793,20 +796,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
-  typeButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 20,
-    marginRight: 8,
-    marginBottom: 8,
-    backgroundColor: '#f0f0f0',
-  },
   typeButtonSelected: {
     backgroundColor: '#4285F4',
-  },
-  typeButtonText: {
-    fontSize: 14,
-    color: '#666',
   },
   typeButtonTextSelected: {
     color: '#fff',
@@ -893,7 +884,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#e3f2fd',
     borderRadius: 8,
   },
-  addQuestionText: {
+  addQuestionButtonText: {
     marginLeft: 8,
     color: '#4285F4',
     fontSize: 16,

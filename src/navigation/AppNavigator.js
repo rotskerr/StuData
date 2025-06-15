@@ -2,13 +2,14 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { NavigationContainer, useFocusEffect } from '@react-navigation/native';
 import { createStackNavigator } from '@react-navigation/stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as SecureStore from 'expo-secure-store';
+import { auth } from '../config/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 
 // Імпорт екранів
-import LoginScreen from '../screens/LoginScreen';
-import RegisterScreen from '../screens/RegisterScreen';
+import AuthScreen from '../screens/AuthScreen';
 import HomeScreen from '../screens/HomeScreen';
 import ProfileScreen from '../screens/ProfileScreen';
 import TestsScreen from '../screens/TestsScreen';
@@ -16,12 +17,20 @@ import SetupProfileScreen from '../screens/SetupProfileScreen';
 import TestDetailScreen from '../screens/TestDetailScreen';
 
 // Імпорт адміністративних екранів
-import AdminDashboardScreen from '../screens/AdminDashboardScreen';
+import AdminScreen from '../screens/AdminScreen';
+
 import AdminTestsScreen from '../screens/AdminTestsScreen';
 import AdminEditTestScreen from '../screens/AdminEditTestScreen';
 import AdminUsersScreen from '../screens/AdminUsersScreen';
 import AdminStatsScreen from '../screens/AdminStatsScreen';
 import AdminSettingsScreen from '../screens/AdminSettingsScreen';
+
+// Імпорт нових адміністративних екранів для управління даними
+import AdminFacultiesScreen from '../screens/AdminFacultiesScreen';
+import AdminSpecialtiesScreen from '../screens/AdminSpecialtiesScreen';
+import AdminGroupsScreen from '../screens/AdminGroupsScreen';
+import AdminReportsScreen from '../screens/AdminReportsScreen';
+import AuthGuard from '../components/AuthGuard';
 
 const Stack = createStackNavigator();
 const AuthStack = createStackNavigator();
@@ -29,10 +38,8 @@ const Tab = createBottomTabNavigator();
 const RootStack = createStackNavigator();
 const AdminStack = createStackNavigator();
 
-// Створюємо контекст для доступу до функцій навігації
 export const NavigationContext = React.createContext();
 
-// Навігація для основних екранів користувача
 const MainTabs = () => {
   return (
     <Tab.Navigator
@@ -61,11 +68,12 @@ const MainTabs = () => {
   );
 };
 
-// Навігація для адміністративних екранів
 const AdminNavigator = () => {
   return (
-    <AdminStack.Navigator screenOptions={{ headerShown: false }}>
-      <AdminStack.Screen name="AdminDashboard" component={AdminDashboardScreen} />
+    <AuthGuard requiredRole="admin">
+      <AdminStack.Navigator screenOptions={{ headerShown: false }}>
+        <AdminStack.Screen name="AdminMain" component={AdminScreen} />
+      
       <AdminStack.Screen 
         name="AdminTests" 
         component={AdminTestsScreen} 
@@ -86,7 +94,26 @@ const AdminNavigator = () => {
         name="AdminSettings" 
         component={AdminSettingsScreen} 
       />
+      
+      {/* Нові екрани для управління даними */}
+      <AdminStack.Screen 
+        name="AdminFaculties" 
+        component={AdminFacultiesScreen} 
+      />
+      <AdminStack.Screen 
+        name="AdminSpecialties" 
+        component={AdminSpecialtiesScreen} 
+      />
+      <AdminStack.Screen 
+        name="AdminGroups" 
+        component={AdminGroupsScreen} 
+      />
+      <AdminStack.Screen 
+        name="AdminReports" 
+        component={AdminReportsScreen} 
+      />
     </AdminStack.Navigator>
+    </AuthGuard>
   );
 };
 
@@ -94,33 +121,93 @@ const AppNavigator = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [authChecked, setAuthChecked] = useState(false);
   const navigationRef = useRef();
 
-  // Функція для перевірки авторизації
   const checkLoginStatus = async () => {
     try {
       const userToken = await SecureStore.getItemAsync('userToken');
       const userRole = await SecureStore.getItemAsync('userRole');
       
+      if (userToken && !userRole) {
+        await SecureStore.deleteItemAsync('userToken');
+        await SecureStore.deleteItemAsync('userEmail');
+        setIsLoggedIn(false);
+        setIsAdmin(false);
+        return;
+      }
+      
+      if (userToken && userToken !== 'admin-token') {
+        const currentUser = auth.currentUser;
+        if (!currentUser || currentUser.uid !== userToken) {
+          await SecureStore.deleteItemAsync('userToken');
+          await SecureStore.deleteItemAsync('userRole');
+          await SecureStore.deleteItemAsync('userEmail');
+          setIsLoggedIn(false);
+          setIsAdmin(false);
+          return;
+        }
+      }
+      
       setIsLoggedIn(userToken !== null);
       setIsAdmin(userRole === 'admin');
     } catch (e) {
-      console.log('Помилка перевірки авторизації:', e);
+      setIsLoggedIn(false);
+      setIsAdmin(false);
     } finally {
       setIsLoading(false);
+      setAuthChecked(true);
     }
   };
 
-  // Перевірка авторизації при запуску
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      
+      if (!user) {
+        const userRole = await SecureStore.getItemAsync('userRole');
+        const userToken = await SecureStore.getItemAsync('userToken');
+        
+        if (userToken !== 'admin-token' && userRole !== 'admin') {
+          await SecureStore.deleteItemAsync('userToken');
+          await SecureStore.deleteItemAsync('userRole');
+          await SecureStore.deleteItemAsync('userEmail');
+          setIsLoggedIn(false);
+          setIsAdmin(false);
+        }
+      }
+      
+      if (authChecked) {
+        await checkLoginStatus();
+      }
+    });
+
+    return unsubscribe;
+  }, [authChecked]);
+
   useEffect(() => {
     checkLoginStatus();
   }, []);
 
+  useEffect(() => {
+    if (!isLoading && authChecked) {
+      const interval = setInterval(async () => {
+        const userToken = await SecureStore.getItemAsync('userToken');
+        if (!userToken && isLoggedIn) {
+          setIsLoggedIn(false);
+          setIsAdmin(false);
+        }
+      }, 30000); // Перевіряємо кожні 30 секунд
+
+      return () => clearInterval(interval);
+    }
+  }, [isLoading, authChecked, isLoggedIn]);
+
   if (isLoading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#f5f5f5' }}>
         <ActivityIndicator size="large" color="#4285F4" />
-        <Text style={{ marginTop: 10 }}>Завантаження...</Text>
+        <Text style={{ marginTop: 10, fontSize: 16, color: '#666' }}>Завантаження...</Text>
+        <Text style={{ marginTop: 5, fontSize: 14, color: '#999' }}>Перевірка авторизації</Text>
       </View>
     );
   }
@@ -131,12 +218,10 @@ const AppNavigator = () => {
         <Stack.Navigator screenOptions={{ headerShown: false }}>
           {isLoggedIn ? (
             isAdmin ? (
-              // Адміністративні екрани
               <>
                 <Stack.Screen name="Admin" component={AdminNavigator} />
               </>
             ) : (
-              // Екрани звичайного користувача
               <>
                 <Stack.Screen name="Main" component={MainTabs} />
                 <Stack.Screen 
@@ -151,10 +236,8 @@ const AppNavigator = () => {
               </>
             )
           ) : (
-            // Екрани авторизації
             <>
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Register" component={RegisterScreen} />
+              <Stack.Screen name="Auth" component={AuthScreen} />
               <Stack.Screen name="SetupProfile" component={SetupProfileScreen} />
             </>
           )}

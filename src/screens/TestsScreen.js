@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { 
   View, 
   Text, 
@@ -8,175 +9,58 @@ import {
   Alert,
   RefreshControl,
   ActivityIndicator,
-  ScrollView
+  ScrollView,
+  SafeAreaView
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { Ionicons } from '@expo/vector-icons';
+import { getAllTests, getAvailableTests, getUserTestResults } from '../services/testService';
+import { getUserProfile, isAdmin } from '../services/authService';
 
 const TestsScreen = ({ navigation, route }) => {
-  const [userFaculty, setUserFaculty] = useState('');
-  const [userSpecialty, setUserSpecialty] = useState('');
-  const [userGroup, setUserGroup] = useState('');
+
+  
   const [tests, setTests] = useState([]);
   const [filteredTests, setFilteredTests] = useState([]);
   const [activeFilter, setActiveFilter] = useState('all'); // 'all', 'available', 'completed', 'pending'
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-
-  // Приклади тестів
-  const mockTests = [
-    {
-      id: '1',
-      title: 'Основи React Native',
-      description: 'Тест для перевірки знань з основ React Native',
-      type: 'test',
-      questions: 10,
-      timeLimit: 20, // хвилин
-      status: 'available', // available, completed, pending
-      score: null,
-      dueDate: '2023-06-01',
-      availableFor: {
-        faculty: 'Інформаційних технологій',
-        specialty: 'Комп\'ютерні науки',
-        group: 'КН-21'
-      },
-      icon: 'logo-react'
-    },
-    {
-      id: '2',
-      title: 'Опитування щодо якості навчання',
-      description: 'Анонімне опитування для покращення якості навчального процесу',
-      type: 'survey',
-      questions: 5,
-      status: 'pending',
-      dueDate: '2023-05-25',
-      availableFor: {
-        faculty: 'Інформаційних технологій',
-        specialty: null,
-        group: null
-      },
-      icon: 'clipboard'
-    },
-    {
-      id: '3',
-      title: 'JavaScript базовий рівень',
-      description: 'Перевірка базових знань з JavaScript',
-      type: 'test',
-      questions: 15,
-      timeLimit: 30,
-      status: 'completed',
-      score: 85,
-      completedDate: '2023-05-10',
-      availableFor: {
-        faculty: 'Інформаційних технологій',
-        specialty: 'Інженерія програмного забезпечення',
-        group: 'ІПЗ-11'
-      },
-      icon: 'logo-javascript'
-    },
-    {
-      id: '4',
-      title: 'Алгоритми та структури даних',
-      description: 'Тест з основних алгоритмів та структур даних',
-      type: 'test',
-      questions: 20,
-      timeLimit: 45,
-      status: 'completed',
-      score: 92,
-      completedDate: '2023-05-05',
-      availableFor: {
-        faculty: 'Інформаційних технологій',
-        specialty: 'Комп\'ютерні науки',
-        group: 'КН-21'
-      },
-      icon: 'git-branch'
-    },
-    {
-      id: '5',
-      title: 'Бази даних',
-      description: 'Тест з основ реляційних баз даних та SQL',
-      type: 'test',
-      questions: 15,
-      timeLimit: 30,
-      status: 'pending',
-      dueDate: '2023-05-28',
-      availableFor: {
-        faculty: 'Інформаційних технологій',
-        specialty: 'Комп\'ютерні науки',
-        group: null
-      },
-      icon: 'server'
-    }
-  ];
+  const [userProfile, setUserProfile] = useState(null);
+  const [userTestResults, setUserTestResults] = useState({});
+  const [stats, setStats] = useState({
+    total: 0,
+    available: 0,
+    completed: 0,
+    pending: 0,
+    averageScore: 0
+  });
+  const [error, setError] = useState(null);
+  const [isUserAdmin, setIsUserAdmin] = useState(false);
 
   useEffect(() => {
-    loadUserData();
+    loadData();
   }, []);
 
+  const initialLoadRef = React.useRef(false);
+  
+  useFocusEffect(
+    useCallback(() => {
+      if (initialLoadRef.current) {
+    
+        loadData();
+      } else {
+        initialLoadRef.current = true;
+      }
+    }, [])
+  );
+
   useEffect(() => {
-    // Перевіряємо, чи є параметр фільтра в навігації
     if (route.params?.filter) {
       setActiveFilter(route.params.filter);
     }
   }, [route.params]);
 
-  useEffect(() => {
-    filterTests();
-  }, [tests, activeFilter]);
-
-  const loadUserData = async () => {
-    setLoading(true);
-    try {
-      const faculty = await SecureStore.getItemAsync('userFaculty');
-      const specialty = await SecureStore.getItemAsync('userSpecialty');
-      const group = await SecureStore.getItemAsync('userGroup');
-      
-      setUserFaculty(faculty || '');
-      setUserSpecialty(specialty || '');
-      setUserGroup(group || '');
-      
-      // Фільтрація доступних тестів для користувача
-      // В реальному додатку це буде запит до Firebase
-      const availableTests = mockTests.filter(test => {
-        const { faculty: testFaculty, specialty: testSpecialty, group: testGroup } = test.availableFor;
-        
-        // Перевірка на відповідність факультету
-        if (testFaculty && testFaculty !== faculty) {
-          return false;
-        }
-        
-        // Перевірка на відповідність спеціальності, якщо вона вказана
-        if (testSpecialty && testSpecialty !== specialty) {
-          return false;
-        }
-        
-        // Перевірка на відповідність групи, якщо вона вказана
-        if (testGroup && testGroup !== group) {
-          return false;
-        }
-        
-        return true;
-      });
-      
-      setTests(availableTests);
-    } catch (error) {
-      console.error('Помилка при завантаженні даних користувача:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadUserData();
-    
-    // Симулюємо затримку для кращого UX
-    setTimeout(() => {
-      setRefreshing(false);
-    }, 1000);
-  };
-
-  const filterTests = () => {
+  const filterTests = useCallback(() => {
     if (activeFilter === 'all') {
       setFilteredTests(tests);
       return;
@@ -184,226 +68,464 @@ const TestsScreen = ({ navigation, route }) => {
     
     const filtered = tests.filter(test => test.status === activeFilter);
     setFilteredTests(filtered);
-  };
+  }, [tests, activeFilter]);
 
-  const handleTestPress = (test) => {
-    if (!userFaculty || !userSpecialty || !userGroup) {
+  useEffect(() => {
+    filterTests();
+  }, [filterTests]);
+
+  const loadData = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      const profile = await getUserProfile();
+      setUserProfile(profile);
+      
+      const adminStatus = await isAdmin();
+      setIsUserAdmin(adminStatus);
+      
+      const { success, tests: availableTests } = await getAvailableTests();
+      if (!success) {
+        const mockTests = [
+          {
+            id: 'mock-1',
+            title: 'Тестовий тест React Native',
+            description: 'Це тестовий тест для перевірки інтерфейсу',
+            type: 'test',
+            questionsCount: 10,
+            timeLimit: 20,
+            isActive: true
+          },
+          {
+            id: 'mock-2',
+            title: 'Опитування про навчання',
+            description: 'Тестове опитування для демонстрації',
+            type: 'survey',
+            questionsCount: 5,
+            timeLimit: null,
+            isActive: true
+          }
+        ];
+        
+        const processedMockTests = mockTests.map(test => ({
+          ...test,
+          status: 'available',
+          icon: getTestIcon(test.type, test.title)
+        }));
+        
+        setTests(processedMockTests);
+        
+        setStats({
+          total: processedMockTests.length,
+          available: processedMockTests.length,
+          completed: 0,
+          pending: 0,
+          averageScore: 0
+        });
+        
+        return;
+      }
+      
+      const userResults = await getUserTestResults();
+      const resultsMap = {};
+      userResults.forEach(result => {
+        resultsMap[result.testId] = result;
+      });
+      setUserTestResults(resultsMap);
+      
+      const processedTests = availableTests.map(test => {
+        const userResult = resultsMap[test.id];
+        const testIcon = getTestIcon(test.type, test.title);
+        
+        if (userResult) {
+          return {
+            ...test,
+            status: 'completed',
+            score: userResult.score,
+            completedAt: userResult.completedAt,
+            icon: testIcon
+          };
+        } else {
+          return {
+            ...test,
+            status: 'available',
+            icon: testIcon
+          };
+        }
+      });
+      
+      setTests(processedTests);
+      
+      const totalTests = processedTests.length;
+      const completedTests = processedTests.filter(t => t.status === 'completed');
+      const availableTestsCount = processedTests.filter(t => t.status === 'available').length;
+      const averageScore = completedTests.length > 0 
+        ? Math.round(completedTests.reduce((sum, test) => sum + test.score, 0) / completedTests.length)
+        : 0;
+      
+      const newStats = {
+        total: totalTests,
+        available: availableTestsCount,
+        completed: completedTests.length,
+        pending: 0,
+        averageScore
+      };
+      
+      setStats(newStats);
+      
+    } catch (error) {
+      console.error('Помилка завантаження даних тестів:', error);
+      setError(error.message || 'Не вдалося завантажити тести');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const getTestIcon = useCallback((type, title) => {
+    if (type === 'survey') return 'clipboard';
+    
+    const titleLower = title.toLowerCase();
+    if (titleLower.includes('react')) return 'logo-react';
+    if (titleLower.includes('javascript') || titleLower.includes('js')) return 'logo-javascript';
+    if (titleLower.includes('база даних') || titleLower.includes('sql')) return 'server';
+    if (titleLower.includes('алгоритм')) return 'git-branch';
+    if (titleLower.includes('програмування')) return 'code';
+    if (titleLower.includes('математика')) return 'calculator';
+    if (titleLower.includes('фізика')) return 'flash';
+    if (titleLower.includes('хімія')) return 'flask';
+    
+    return 'document-text';
+  }, []);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    setError(null);
+    await loadData();
+    setRefreshing(false);
+  }, [loadData]);
+
+  const handleTestPress = useCallback((test) => {
+    if (test.id.startsWith('mock-')) {
       Alert.alert(
-        'Профіль не заповнено',
-        'Будь ласка, заповніть інформацію про факультет, спеціальність та групу у профілі перед проходженням тестів.',
-        [
-          { text: 'OK' }
-        ]
+        'Тестовий тест',
+        'Це тестовий тест для демонстрації інтерфейсу. Реальні тести будуть доступні після налаштування Firebase та створення тестових даних адміністратором.',
+        [{ text: 'Зрозуміло' }]
       );
       return;
     }
     
-    // Перевіряємо статус тесту
+    if (!userProfile) {
+      Alert.alert('Помилка', 'Спочатку заповніть свій профіль');
+      return;
+    }
+    
     if (test.status === 'completed') {
-      // Показуємо результати
       Alert.alert(
-        'Результати тесту', 
-        `Ви вже пройшли цей тест.\nРезультат: ${test.score}%`,
+        'Тест завершено',
+        `Ви вже пройшли цей тест з результатом ${test.score}%. Дата проходження: ${formatDate(test.completedAt)}`,
         [
-          { text: 'OK' },
-          { 
-            text: 'Переглянути', 
-            onPress: () => navigation.navigate('TestDetail', { testId: test.id, isReview: true }) 
-          }
-        ]
-      );
-    } else if (test.status === 'pending') {
-      // Показуємо інформацію про очікування та пропонуємо переглянути тест
-      Alert.alert(
-        'Тест очікує', 
-        `Цей тест буде доступний до: ${formatDate(test.dueDate)}`,
-        [
-          { text: 'OK' },
-          { 
-            text: 'Переглянути', 
-            onPress: () => navigation.navigate('TestDetail', { testId: test.id, isPreview: true }) 
-          }
+          { text: 'OK', style: 'cancel' },
+          { text: 'Переглянути відповіді', onPress: () => navigation.navigate('TestDetail', { testId: test.id, reviewMode: true }) }
         ]
       );
     } else {
-      // Починаємо тест
       Alert.alert(
-        'Почати тест?',
-        `Ви готові почати тест "${test.title}"?\n\nКількість питань: ${test.questions}\nЧас на виконання: ${test.timeLimit} хв.`,
+        'Почати тест',
+        `Ви збираєтеся почати тест "${test.title}". Переконайтеся, що у вас є достатньо часу для його проходження.`,
         [
-          {
-            text: 'Скасувати',
-            style: 'cancel'
-          },
-          {
-            text: 'Почати',
-            onPress: () => {
-              // Переходимо до екрану з тестом
-              navigation.navigate('TestDetail', { testId: test.id });
-            }
-          }
+          { text: 'Скасувати', style: 'cancel' },
+          { text: 'Почати', onPress: () => navigation.navigate('TestDetail', { testId: test.id }) }
         ]
       );
     }
-  };
+  }, [userProfile, navigation]);
 
-  const formatDate = (dateString) => {
-    const options = { day: 'numeric', month: 'long', year: 'numeric' };
-    return new Date(dateString).toLocaleDateString('uk-UA', options);
-  };
+  const formatDate = useCallback((dateString) => {
+    if (!dateString) return 'Не вказано';
+    const date = new Date(dateString);
+    return date.toLocaleDateString('uk-UA');
+  }, []);
 
-  const renderFilterButton = (filter, label, icon, color) => (
-    <TouchableOpacity
-      style={[
-        styles.filterButton,
-        activeFilter === filter && { backgroundColor: color + '20' } // Додаємо прозорість
-      ]}
-      onPress={() => setActiveFilter(filter)}
-    >
-      <Ionicons 
-        name={icon} 
-        size={18} 
-        color={activeFilter === filter ? color : '#666'} 
-        style={styles.filterIcon}
-      />
-      <Text 
-        style={[
-          styles.filterText,
-          activeFilter === filter && { color, fontWeight: 'bold' }
-        ]}
-      >
-        {label}
-      </Text>
-    </TouchableOpacity>
-  );
+  const getScoreColor = useCallback((score) => {
+    if (score >= 90) return '#0F9D58'; // Зелений
+    if (score >= 75) return '#4285F4'; // Синій
+    if (score >= 60) return '#F4B400'; // Жовтий
+    return '#DB4437'; // Червоний
+  }, []);
 
-  const renderTestItem = ({ item }) => {
-    // Визначаємо колір та іконку в залежності від статусу тесту
-    let statusColor, statusIcon, statusText;
+  const renderTestItem = useCallback(({ item }) => {
+    let statusColor = '#4285F4'; // За замовчуванням синій (доступний)
+    let statusIcon = 'play-circle';
+    let statusText = 'Доступний';
     
-    switch(item.status) {
-      case 'completed':
-        statusColor = '#0F9D58';
-        statusIcon = 'checkmark-circle';
-        statusText = 'Завершено';
-        break;
-      case 'pending':
-        statusColor = '#F4B400';
-        statusIcon = 'time';
-        statusText = 'Очікує';
-        break;
-      default:
-        statusColor = '#4285F4';
-        statusIcon = 'list';
-        statusText = 'Доступно';
+    if (item.status === 'completed') {
+      statusColor = getScoreColor(item.score);
+      statusIcon = 'checkmark-circle';
+      statusText = `${item.score}%`;
+    } else if (item.status === 'pending') {
+      statusColor = '#FBBC05'; // Жовтий
+      statusIcon = 'time';
+      statusText = item.dueDate ? `До ${formatDate(item.dueDate)}` : 'Очікує';
     }
     
     return (
       <TouchableOpacity 
-        style={[styles.testItem, { borderLeftColor: statusColor }]}
+        style={styles.testCard}
         onPress={() => handleTestPress(item)}
       >
-        <View style={styles.testIconContainer}>
-          <Ionicons name={item.icon} size={28} color={statusColor} />
+        <View style={[styles.testIconContainer, { backgroundColor: statusColor + '20' }]}>
+          <Ionicons name={item.icon || 'document-text'} size={28} color={statusColor} />
         </View>
         
         <View style={styles.testContent}>
-          <View style={styles.testHeader}>
-            <Text style={styles.testTitle} numberOfLines={1} ellipsizeMode="tail">{item.title}</Text>
-            <View style={[styles.testTypeBadge, { backgroundColor: item.type === 'test' ? '#e3f2fd' : '#f1f8e9' }]}>
-              <Text style={[styles.testTypeBadgeText, { color: item.type === 'test' ? '#1565c0' : '#2e7d32' }]}>
+          <View style={styles.testMainInfo}>
+            <Text style={styles.testTitle} numberOfLines={2}>{item.title}</Text>
+            <Text style={styles.testDescription} numberOfLines={2}>
+              {item.description || 'Опис тесту відсутній'}
+            </Text>
+          </View>
+          
+          <View style={styles.testDetails}>
+            <View style={styles.testDetailItem}>
+              <Ionicons name="help-circle-outline" size={14} color="#666" />
+              <Text style={styles.testDetailText}>
+                {item.questionsCount} питань
+              </Text>
+            </View>
+            
+            {item.timeLimit && (
+              <View style={styles.testDetailItem}>
+                <Ionicons name="time-outline" size={14} color="#666" />
+                <Text style={styles.testDetailText}>
+                  {item.timeLimit} хв
+                </Text>
+              </View>
+            )}
+            
+            <View style={styles.testDetailItem}>
+              <Ionicons name="apps-outline" size={14} color="#666" />
+              <Text style={styles.testDetailText}>
                 {item.type === 'test' ? 'Тест' : 'Опитування'}
               </Text>
             </View>
           </View>
-          
-          <Text style={styles.testDescription} numberOfLines={2} ellipsizeMode="tail">{item.description}</Text>
-          
-          <View style={styles.testFooter}>
-            <View style={styles.testInfoContainer}>
-              <Text style={styles.testInfo}>Питань: {item.questions}</Text>
-              {item.timeLimit && (
-                <Text style={styles.testInfo}>Час: {item.timeLimit} хв</Text>
-              )}
-            </View>
-            
-            <View style={[styles.testStatusBadge, { backgroundColor: statusColor + '20' }]}>
-              <Ionicons name={statusIcon} size={14} color={statusColor} style={styles.testStatusIcon} />
-              <Text style={[styles.testStatusText, { color: statusColor }]}>{statusText}</Text>
-            </View>
-          </View>
-          
-          {item.status === 'completed' && (
-            <View style={styles.scoreContainer}>
-              <Text style={styles.scoreLabel}>Результат:</Text>
-              <Text style={[styles.scoreValue, { color: getScoreColor(item.score) }]}>{item.score}%</Text>
-            </View>
-          )}
-          
-          {item.status === 'pending' && (
-            <Text style={styles.dueDate}>До: {formatDate(item.dueDate)}</Text>
-          )}
+        </View>
+        
+        <View style={[styles.testStatus, { backgroundColor: statusColor }]}>
+          <Ionicons name={statusIcon} size={16} color="#fff" />
+          <Text style={styles.testStatusText}>{statusText}</Text>
         </View>
       </TouchableOpacity>
     );
-  };
-
-  // Функція для визначення кольору результату в залежності від оцінки
-  const getScoreColor = (score) => {
-    if (score >= 90) return '#0F9D58';
-    if (score >= 75) return '#4285F4';
-    if (score >= 60) return '#F4B400';
-    return '#DB4437';
-  };
+  }, [handleTestPress, formatDate, getScoreColor]);
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#4285F4" />
-        <Text style={styles.loadingText}>Завантаження тестів...</Text>
-      </View>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Тести та опитування</Text>
+          <Text style={styles.headerSubtitle}>Завантаження...</Text>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#4285F4" />
+          <Text style={styles.loadingText}>Завантаження тестів...</Text>
+          <Text style={styles.loadingSubtext}>Це може зайняти кілька секунд</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (error) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Тести та опитування</Text>
+          <Text style={styles.headerSubtitle}>Помилка завантаження</Text>
+        </View>
+        <View style={styles.emptyContainer}>
+          <Ionicons name="alert-circle" size={64} color="#DB4437" />
+          <Text style={styles.emptyText}>Помилка завантаження</Text>
+          <Text style={styles.emptySubtext}>{error}</Text>
+          <TouchableOpacity 
+            style={styles.refreshButton}
+            onPress={onRefresh}
+          >
+            <Ionicons name="refresh" size={20} color="#4285F4" />
+            <Text style={styles.refreshButtonText}>Спробувати знову</Text>
+          </TouchableOpacity>
+
+        </View>
+      </SafeAreaView>
     );
   }
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.screenTitle}>Тести та опитування</Text>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>Тести та опитування</Text>
+        <Text style={styles.headerSubtitle}>
+          {stats.total > 0 ? `${stats.total} тестів доступно` : 'Немає доступних тестів'}
+        </Text>
+      </View>
       
-      {!userFaculty && (
-        <View style={styles.warningContainer}>
-          <Ionicons name="alert-circle" size={20} color="#856404" style={styles.warningIcon} />
-          <Text style={styles.warningText}>
-            Заповніть інформацію про факультет, спеціальність та групу у профілі для доступу до всіх тестів.
-          </Text>
-        </View>
-      )}
-      
-      <View style={styles.filtersOuterContainer}>
+      {/* Об'єднані фільтри зі статистикою */}
+      {stats.total > 0 && (
         <ScrollView 
           horizontal 
           showsHorizontalScrollIndicator={false} 
+          style={styles.filtersContainer}
           contentContainerStyle={styles.filtersContent}
         >
-          {renderFilterButton('all', 'Усі', 'apps', '#666')}
-          {renderFilterButton('available', 'Доступні', 'list', '#4285F4')}
-          {renderFilterButton('completed', 'Завершені', 'checkmark-circle', '#0F9D58')}
-          {renderFilterButton('pending', 'Очікують', 'time', '#F4B400')}
+          {/* Фільтри з інтегрованою статистикою */}
+          <TouchableOpacity
+            style={[
+              styles.filterCard,
+              activeFilter === 'all' && styles.filterCardActive
+            ]}
+            onPress={() => setActiveFilter('all')}
+          >
+            <View style={styles.filterCardIcon}>
+              <Ionicons name="apps" size={16} color={activeFilter === 'all' ? '#fff' : '#4285F4'} />
+            </View>
+            <Text style={[
+              styles.filterCardValue, 
+              activeFilter === 'all' && styles.filterCardValueActive
+            ]}>
+              {stats.total}
+            </Text>
+            <Text style={[
+              styles.filterCardLabel,
+              activeFilter === 'all' && styles.filterCardLabelActive
+            ]}>
+              Всього
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterCard,
+              activeFilter === 'available' && styles.filterCardActive
+            ]}
+            onPress={() => setActiveFilter('available')}
+          >
+            <View style={styles.filterCardIcon}>
+              <Ionicons name="play-circle" size={16} color={activeFilter === 'available' ? '#fff' : '#4285F4'} />
+            </View>
+            <Text style={[
+              styles.filterCardValue,
+              activeFilter === 'available' && styles.filterCardValueActive
+            ]}>
+              {stats.available}
+            </Text>
+            <Text style={[
+              styles.filterCardLabel,
+              activeFilter === 'available' && styles.filterCardLabelActive
+            ]}>
+              Доступно
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.filterCard,
+              activeFilter === 'completed' && styles.filterCardActive
+            ]}
+            onPress={() => setActiveFilter('completed')}
+          >
+            <View style={styles.filterCardIcon}>
+              <Ionicons name="checkmark-circle" size={16} color={activeFilter === 'completed' ? '#fff' : '#0F9D58'} />
+            </View>
+            <Text style={[
+              styles.filterCardValue,
+              activeFilter === 'completed' && styles.filterCardValueActive
+            ]}>
+              {stats.completed}
+            </Text>
+            <Text style={[
+              styles.filterCardLabel,
+              activeFilter === 'completed' && styles.filterCardLabelActive
+            ]}>
+              Завершено
+            </Text>
+          </TouchableOpacity>
+
+          {stats.pending > 0 && (
+            <TouchableOpacity
+              style={[
+                styles.filterCard,
+                activeFilter === 'pending' && styles.filterCardActive
+              ]}
+              onPress={() => setActiveFilter('pending')}
+            >
+              <View style={styles.filterCardIcon}>
+                <Ionicons name="time" size={16} color={activeFilter === 'pending' ? '#fff' : '#F4B400'} />
+              </View>
+              <Text style={[
+                styles.filterCardValue,
+                activeFilter === 'pending' && styles.filterCardValueActive
+              ]}>
+                {stats.pending}
+              </Text>
+              <Text style={[
+                styles.filterCardLabel,
+                activeFilter === 'pending' && styles.filterCardLabelActive
+              ]}>
+                Очікують
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          {stats.averageScore > 0 && (
+            <View style={styles.filterCard}>
+              <View style={styles.filterCardIcon}>
+                <Ionicons name="trophy" size={16} color="#F4B400" />
+              </View>
+              <Text style={styles.filterCardValue}>
+                {stats.averageScore}%
+              </Text>
+              <Text style={styles.filterCardLabel}>
+                Середній бал
+              </Text>
+            </View>
+          )}
         </ScrollView>
-      </View>
+      )}
       
+      {/* Список тестів */}
       {filteredTests.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Ionicons name="document-text-outline" size={60} color="#ccc" />
+          <Ionicons name="document-text" size={64} color="#ddd" />
           <Text style={styles.emptyText}>
-            Немає доступних тестів у цій категорії.
+            {activeFilter === 'all' 
+              ? 'Немає доступних тестів' 
+              : `Немає тестів у категорії "${
+                  activeFilter === 'available' ? 'Доступні' : 
+                  activeFilter === 'completed' ? 'Завершені' : 'Очікують'
+                }"`}
           </Text>
+          {activeFilter === 'all' && (
+            <>
+              <Text style={styles.emptySubtext}>
+                Тести з'являться тут, коли адміністратор їх створить
+              </Text>
+              <TouchableOpacity 
+                style={styles.refreshButton}
+                onPress={onRefresh}
+              >
+                <Ionicons name="refresh" size={20} color="#4285F4" />
+                <Text style={styles.refreshButtonText}>Оновити</Text>
+              </TouchableOpacity>
+
+            </>
+          )}
         </View>
       ) : (
         <FlatList
           data={filteredTests}
           renderItem={renderTestItem}
           keyExtractor={item => item.id}
-          contentContainerStyle={styles.list}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
@@ -415,192 +537,236 @@ const TestsScreen = ({ navigation, route }) => {
           }
         />
       )}
-    </View>
+    </SafeAreaView>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    padding: 20,
+    backgroundColor: '#f8f9fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#fff',
+    backgroundColor: '#f8f9fa',
   },
   loadingText: {
     marginTop: 10,
-    color: '#666',
     fontSize: 16,
+    color: '#666',
   },
-  screenTitle: {
-    fontSize: 22,
+  loadingSubtext: {
+    marginTop: 5,
+    fontSize: 14,
+    color: '#999',
+    textAlign: 'center',
+  },
+  header: {
+    backgroundColor: '#4285F4',
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  headerTitle: {
+    fontSize: 24,
     fontWeight: 'bold',
-    marginBottom: 20,
+    color: '#fff',
+    marginBottom: 4,
   },
-  warningContainer: {
-    backgroundColor: '#fff3cd',
-    borderColor: '#ffeeba',
-    borderWidth: 1,
-    padding: 15,
-    borderRadius: 10,
-    marginBottom: 20,
-    flexDirection: 'row',
-    alignItems: 'center',
+  headerSubtitle: {
+    fontSize: 14,
+    color: '#e3f2fd',
   },
-  warningIcon: {
-    marginRight: 10,
-  },
-  warningText: {
-    color: '#856404',
-    flex: 1,
-  },
-  filtersOuterContainer: {
-    height: 50, // Фіксована висота для контейнера фільтрів
-    marginBottom: 15,
+  filtersContainer: {
+    position: 'absolute',
+    paddingVertical: 15,
+    paddingBottom: 25,
+    maxHeight: 140,
+    zIndex: 10,
+    elevation: 10,
+    backgroundColor: '#f8f9fa',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    marginBottom: 5,
   },
   filtersContent: {
-    alignItems: 'center', // Вирівнювання по центру вертикально
-    height: 40, // Фіксована висота для фільтрів
+    paddingHorizontal: 16,
   },
-  filterButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-    backgroundColor: '#f5f5f5',
-    height: 36, // Фіксована висота для кнопок фільтрів
-  },
-  filterIcon: {
-    marginRight: 5,
-  },
-  filterText: {
-    color: '#666',
-    fontSize: 14,
-  },
-  list: {
-    paddingBottom: 20,
-  },
-  testItem: {
-    backgroundColor: '#f9f9f9',
-    padding: 15,
+  filterCard: {
+    backgroundColor: '#fff',
+    padding: 10,
     borderRadius: 12,
-    marginBottom: 15,
-    borderLeftWidth: 5,
-    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+    minWidth: 90,
+    minHeight: 85,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
+    shadowRadius: 3,
+    elevation: 5,
+    zIndex: 5,
+  },
+  filterCardActive: {
+    backgroundColor: '#4285F4',
+    borderColor: '#4285F4',
+  },
+  filterCardIcon: {
+    marginBottom: 4,
+  },
+  filterCardValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4285F4',
+    marginBottom: 2,
+    lineHeight: 20,
+  },
+  filterCardValueActive: {
+    color: '#fff',
+  },
+  filterCardLabel: {
+    fontSize: 11,
+    color: '#666',
+    textAlign: 'center',
+    fontWeight: '500',
+    lineHeight: 13,
+  },
+  filterCardLabelActive: {
+    color: '#fff',
+  },
+  listContent: {
+    padding: 16,
+    paddingTop: 40,
+  },
+  testCard: {
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 4,
+    elevation: 3,
+    borderWidth: 1,
+    borderColor: '#f0f0f0',
   },
   testIconContainer: {
-    marginRight: 15,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 40,
+    marginRight: 15,
+    marginTop: 2,
   },
   testContent: {
     flex: 1,
-  },
-  testHeader: {
-    flexDirection: 'row',
+    marginRight: 10,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 10,
+  },
+  testMainInfo: {
+    marginBottom: 8,
   },
   testTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    flex: 1,
-    marginRight: 10,
-  },
-  testTypeBadge: {
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    flexShrink: 0, // Запобігає зменшенню бейджа
-  },
-  testTypeBadgeText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  testDescription: {
-    color: '#666',
-    marginBottom: 10,
-    flexWrap: 'wrap', // Дозволяє тексту переноситись
-  },
-  testFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    flexWrap: 'wrap', // Дозволяє контенту переноситись
-  },
-  testInfoContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap', // Дозволяє інформації переноситись
-    flex: 1,
-  },
-  testInfo: {
-    fontSize: 14,
-    color: '#666',
-    marginRight: 15,
-    marginBottom: 5, // Додаємо відступ знизу для переносу
-  },
-  testStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 3,
-    paddingHorizontal: 8,
-    borderRadius: 12,
-    flexShrink: 0, // Запобігає зменшенню бейджа
-  },
-  testStatusIcon: {
-    marginRight: 4,
-  },
-  testStatusText: {
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  scoreContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 10,
-    paddingTop: 10,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  scoreLabel: {
-    fontSize: 14,
-    color: '#666',
-    marginRight: 5,
-  },
-  scoreValue: {
     fontSize: 16,
     fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 4,
   },
-  dueDate: {
+  testDescription: {
     fontSize: 14,
     color: '#666',
-    marginTop: 10,
-    fontStyle: 'italic',
+    marginBottom: 4,
+    lineHeight: 18,
+    maxHeight: 36,
+  },
+  testDetails: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 4,
+  },
+  testDetailItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+    marginBottom: 2,
+  },
+  testDetailText: {
+    fontSize: 12,
+    color: '#666',
+    marginLeft: 4,
+  },
+  testStatus: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 15,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minWidth: 70,
+    justifyContent: 'center',
+    alignSelf: 'flex-start',
+    marginTop: 2,
+  },
+  testStatusText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+    marginLeft: 4,
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 50,
+    padding: 40,
+    marginTop: 30,
   },
   emptyText: {
-    fontSize: 16,
-    color: '#666',
+    marginTop: 16,
+    fontSize: 18,
+    color: '#999',
     textAlign: 'center',
-    marginTop: 10,
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    marginTop: 8,
+    fontSize: 14,
+    color: '#ccc',
+    textAlign: 'center',
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#e3f2fd',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 25,
+    marginTop: 20,
+    borderWidth: 1,
+    borderColor: '#4285F4',
+  },
+  refreshButtonText: {
+    marginLeft: 8,
+    fontSize: 16,
+    color: '#4285F4',
+    fontWeight: '500',
   },
 });
 

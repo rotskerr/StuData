@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useContext, useRef } from 'react';
+import React, { useEffect, useState, useContext, useRef, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -7,179 +7,232 @@ import {
   TouchableOpacity, 
   RefreshControl,
   ActivityIndicator,
-  Image,
+  Alert,
   Animated
 } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
 import { useFocusEffect } from '@react-navigation/native';
 import { NavigationContext } from '../navigation/AppNavigator';
 import { Ionicons } from '@expo/vector-icons';
+import { getAvailableTests, getUserTestResults } from '../services/testService';
+import { getUserProfile } from '../services/userService';
 
-const HomeScreen = ({ navigation }) => {
-  const [userEmail, setUserEmail] = useState('');
-  const [userFaculty, setUserFaculty] = useState('');
-  const [userGroup, setUserGroup] = useState('');
+const HomeScreen = ({ navigation, route }) => {
+  const [userProfile, setUserProfile] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [announcements, setAnnouncements] = useState([
-    { 
-      id: '1', 
-      title: 'Нове опитування доступне', 
-      description: 'Опитування щодо якості навчання. Будь ласка, пройдіть його до кінця тижня.', 
-      date: '2023-05-15',
-      icon: 'document-text'
-    },
-    { 
-      id: '2', 
-      title: 'Тест з програмування', 
-      description: 'Перевірка знань з React Native. Тест складається з 20 питань.', 
-      date: '2023-05-12',
-      icon: 'code-slash'
-    },
-    { 
-      id: '3', 
-      title: 'Важливе повідомлення', 
-      description: 'Оновлення системи заплановано на наступний тиждень. Можливі короткочасні перебої в роботі.', 
-      date: '2023-05-10',
-      icon: 'alert-circle'
-    },
-    { 
-      id: '4', 
-      title: 'Результати минулого тесту', 
-      description: 'Результати тесту з основ програмування доступні у вашому профілі.', 
-      date: '2023-05-08',
-      icon: 'trophy'
-    },
-  ]);
+  const [loading, setLoading] = useState(true);
+  const [testStats, setTestStats] = useState({
+    available: 0,
+    completed: 0,
+    pending: 0,
+    total: 0
+  });
+  const [recentActivity, setRecentActivity] = useState([]);
   const { checkLoginStatus } = useContext(NavigationContext);
   const highlightAnimation = useRef(new Animated.Value(0)).current;
-  const [lastUpdatedItemId, setLastUpdatedItemId] = useState(null);
 
-  // Статистика тестів
-  const testStats = {
-    available: 3,
-    completed: 2,
-    pending: 1
-  };
+  useFocusEffect(
+    useCallback(() => {
+      const checkAuthAndLoadData = async () => {
+        const userToken = await SecureStore.getItemAsync('userToken');
+        if (!userToken) {
+          if (checkLoginStatus) {
+            await checkLoginStatus();
+          }
+          return;
+        }
+        
+        loadUserData();
+      };
+      
+      checkAuthAndLoadData();
+    }, [checkLoginStatus])
+  );
 
-  // Отримуємо дані користувача при завантаженні екрану
   useEffect(() => {
-    loadUserData();
-  }, []);
+    if (route?.params?.refresh) {
+      loadUserData();
+      navigation.setParams({ refresh: false, testCompleted: null });
+    }
+  }, [route?.params?.refresh]);
 
   const loadUserData = async () => {
     try {
-      const email = await SecureStore.getItemAsync('userEmail');
-      const faculty = await SecureStore.getItemAsync('userFaculty');
-      const group = await SecureStore.getItemAsync('userGroup');
+      setLoading(true);
       
-      if (email) setUserEmail(email);
-      if (faculty) setUserFaculty(faculty);
-      if (group) setUserGroup(group);
+      const profile = await getUserProfile();
+      
+      if (profile) {
+        setUserProfile(profile);
+        await loadTestStatistics();
+        await loadRecentActivity();
+      } else {
+        setUserProfile({
+          email: 'Гість',
+          firstName: 'Гість',
+          lastName: '',
+          role: 'user'
+        });
+        await loadTestStatistics();
+        await loadRecentActivity();
+      }
+      
     } catch (error) {
       console.error('Помилка при завантаженні даних користувача:', error);
+      setUserProfile({
+        email: 'Помилка завантаження',
+        firstName: 'Користувач',
+        lastName: '',
+        role: 'user'
+      });
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Функція для оновлення даних при pull-to-refresh
+  const loadTestStatistics = async () => {
+    try {
+      const { success, tests } = await getAvailableTests();
+      
+      if (!success) {
+        setTestStats({ total: 0, completed: 0, available: 0, pending: 0 });
+        return;
+      }
+
+      const userResults = await getUserTestResults();
+      
+      const completedTestIds = new Set(userResults.map(result => result.testId));
+
+      const stats = {
+        total: tests.length,
+        completed: userResults.length,
+        available: tests.filter(test => !completedTestIds.has(test.id)).length,
+        pending: 0
+      };
+
+      setTestStats(stats);
+    } catch (error) {
+      console.error('Помилка завантаження статистики тестів:', error);
+      setTestStats({ total: 0, completed: 0, available: 0, pending: 0 });
+    }
+  };
+
+  const loadRecentActivity = async () => {
+    try {
+      const userResults = await getUserTestResults();
+      const { success, tests } = await getAvailableTests();
+      
+      if (!success) return;
+
+      const testsMap = tests.reduce((acc, test) => {
+        acc[test.id] = test;
+        return acc;
+      }, {});
+
+      const activity = [];
+
+      const recentResults = userResults
+        .sort((a, b) => new Date(b.completedAt) - new Date(a.completedAt))
+        .slice(0, 3);
+
+      recentResults.forEach(result => {
+        const test = testsMap[result.testId];
+        if (test) {
+          activity.push({
+            id: `result_${result.testId}`,
+            type: 'completed',
+            title: `Завершено: ${test.title}`,
+            description: `Результат: ${result.score}% • ${formatTime(result.timeSpent)}`,
+            date: result.completedAt,
+            icon: 'checkmark-circle',
+            color: result.score >= 75 ? '#0F9D58' : result.score >= 60 ? '#F4B400' : '#DB4437',
+            onPress: () => navigation.navigate('TestDetail', { testId: test.id, isReview: true })
+          });
+        }
+      });
+
+      const availableTests = tests
+        .filter(test => !userResults.some(result => result.testId === test.id))
+        .slice(0, 2);
+
+      availableTests.forEach(test => {
+        activity.push({
+          id: `available_${test.id}`,
+          type: 'available',
+          title: `Доступний: ${test.title}`,
+          description: `${test.questions?.length || 0} питань • ${test.timeLimit || 'Без обмежень'} хв`,
+          date: test.createdAt || new Date().toISOString(),
+          icon: 'document-text',
+          color: '#4285F4',
+          onPress: () => navigation.navigate('TestDetail', { testId: test.id })
+        });
+      });
+
+      if (activity.length === 0) {
+        activity.push({
+          id: 'welcome',
+          type: 'info',
+          title: 'Ласкаво просимо до StuData!',
+          description: 'Почніть з проходження доступних тестів у розділі "Тести"',
+          date: new Date().toISOString(),
+          icon: 'school',
+          color: '#4285F4',
+          onPress: () => navigation.navigate('Tests')
+        });
+      }
+
+      activity.sort((a, b) => new Date(b.date) - new Date(a.date));
+      setRecentActivity(activity);
+    } catch (error) {
+      console.error('Помилка завантаження активності:', error);
+    }
+  };
+
   const onRefresh = async () => {
     setRefreshing(true);
+    await loadUserData();
     
-    // Симулюємо завантаження даних
-    setTimeout(() => {
-      // Оновлюємо дані користувача
-      loadUserData();
-      
-      const currentTime = new Date();
-      const formattedTime = currentTime.toLocaleTimeString();
-      const currentDate = currentTime.toISOString().split('T')[0];
-      
-      // Перевіряємо, чи є вже повідомлення про оновлення (з icon: 'refresh')
-      const updateNotificationIndex = announcements.findIndex(item => item.icon === 'refresh');
-      let updatedItemId;
-      
-      if (updateNotificationIndex !== -1) {
-        // Якщо повідомлення про оновлення вже є, оновлюємо його
-        const updatedAnnouncements = [...announcements];
-        updatedItemId = updatedAnnouncements[updateNotificationIndex].id;
-        updatedAnnouncements[updateNotificationIndex] = {
-          ...updatedAnnouncements[updateNotificationIndex],
-          description: `Дані оновлено ${formattedTime}`,
-          date: currentDate
-        };
-        setAnnouncements(updatedAnnouncements);
-      } else {
-        // Якщо повідомлення про оновлення ще немає, додаємо нове
-        const newAnnouncement = {
-          id: Date.now().toString(),
-          title: 'Оновлено щойно',
-          description: `Дані оновлено ${formattedTime}`,
-          date: currentDate,
-          icon: 'refresh'
-        };
-        
-        updatedItemId = newAnnouncement.id;
-        setAnnouncements(prev => [newAnnouncement, ...prev.slice(0, 4)]);
-      }
-      
-      // Запускаємо анімацію підсвічування
-      setLastUpdatedItemId(updatedItemId);
-      highlightAnimation.setValue(1);
-      
-      Animated.timing(highlightAnimation, {
-        toValue: 0,
-        duration: 1500,
-        useNativeDriver: false
-      }).start(() => {
-        setLastUpdatedItemId(null);
-      });
-      
-      setRefreshing(false);
-    }, 1500);
+    highlightAnimation.setValue(1);
+    Animated.timing(highlightAnimation, {
+      toValue: 0,
+      duration: 1000,
+      useNativeDriver: false
+    }).start();
+    
+    setRefreshing(false);
   };
 
-  // Форматування дати
+  const formatTime = (seconds) => {
+    if (!seconds) return '0 хв';
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes} хв`;
+  };
+
   const formatDate = (dateString) => {
+    const date = new Date(dateString);
+    const now = new Date();
+    const diffTime = Math.abs(now - date);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    if (diffDays === 1) return 'Вчора';
+    if (diffDays < 7) return `${diffDays} дн. тому`;
+    
     const options = { day: 'numeric', month: 'long' };
-    return new Date(dateString).toLocaleDateString('uk-UA', options);
+    return date.toLocaleDateString('uk-UA', options);
   };
 
-  const renderAnnouncementItem = ({ item }) => {
-    const isUpdatedItem = item.id === lastUpdatedItemId;
-    
-    const backgroundColor = isUpdatedItem 
-      ? highlightAnimation.interpolate({
-          inputRange: [0, 1],
-          outputRange: ['#f9f9f9', '#e3f2fd']
-        })
-      : '#f9f9f9';
-      
+  const renderActivityItem = ({ item }) => {
     return (
-      <TouchableOpacity onPress={() => {
-        // Тут можна додати дію при натисканні на оголошення
-        if (item.icon === 'code-slash') {
-          // Для тестів з програмування переходимо на екран тесту з id=1
-          navigation.navigate('TestDetail', { testId: '1' });
-        } else if (item.icon === 'document-text') {
-          // Для опитувань переходимо на екран тесту з id=2
-          navigation.navigate('TestDetail', { testId: '2' });
-        } else {
-          // Для інших оголошень переходимо на екран тестів
-          navigation.navigate('Tests');
-        }
-      }}>
-        <Animated.View style={[
-          styles.announcementItem,
-          { backgroundColor }
-        ]}>
-          <View style={styles.announcementIconContainer}>
-            <Ionicons name={item.icon} size={24} color="#4285F4" />
-          </View>
-          <View style={styles.announcementContent}>
-            <Text style={styles.announcementTitle}>{item.title}</Text>
-            <Text style={styles.announcementDesc}>{item.description}</Text>
-            <Text style={styles.announcementDate}>{formatDate(item.date)}</Text>
-          </View>
-        </Animated.View>
+      <TouchableOpacity onPress={item.onPress} style={styles.activityItem}>
+        <View style={[styles.activityIconContainer, { backgroundColor: item.color + '20' }]}>
+          <Ionicons name={item.icon} size={24} color={item.color} />
+        </View>
+        <View style={styles.activityContent}>
+          <Text style={styles.activityTitle}>{item.title}</Text>
+          <Text style={styles.activityDescription}>{item.description}</Text>
+          <Text style={styles.activityDate}>{formatDate(item.date)}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#ccc" />
       </TouchableOpacity>
     );
   };
@@ -195,53 +248,102 @@ const HomeScreen = ({ navigation }) => {
     </TouchableOpacity>
   );
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Доброго ранку';
+    if (hour < 17) return 'Добрий день';
+    return 'Добрий вечір';
+  };
+
+  const getUserDisplayName = () => {
+    if (userProfile?.firstName && userProfile?.lastName) {
+      return `${userProfile.firstName} ${userProfile.lastName}`;
+    }
+    if (userProfile?.email) {
+      return userProfile.email.split('@')[0];
+    }
+    return 'Користувач';
+  };
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Завантаження...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <Animated.View style={[
+        styles.header,
+        {
+          backgroundColor: highlightAnimation.interpolate({
+            inputRange: [0, 1],
+            outputRange: ['#fff', '#e3f2fd']
+          })
+        }
+      ]}>
         <View style={styles.userInfoContainer}>
-          <Text style={styles.greeting}>Вітаємо, {userEmail}</Text>
-          {userFaculty && userGroup && (
+          <Text style={styles.greeting}>
+            {getGreeting()}, {getUserDisplayName()}!
+          </Text>
+          {userProfile?.facultyName && userProfile?.groupName && (
             <Text style={styles.userDetails}>
-              {userFaculty}, група {userGroup}
+              {userProfile.facultyName} • {userProfile.groupName}
             </Text>
           )}
+          {(!userProfile?.facultyName || !userProfile?.groupName) && (
+            <TouchableOpacity 
+              style={styles.completeProfileButton}
+              onPress={() => navigation.navigate('Profile')}
+            >
+              <Ionicons name="warning" size={16} color="#F4B400" />
+              <Text style={styles.completeProfileText}>Заповніть профіль</Text>
+            </TouchableOpacity>
+          )}
         </View>
-      </View>
+      </Animated.View>
 
       <View style={styles.statsContainer}>
         {renderStatCard(
-          'Доступні', 
-          testStats.available, 
+          'Всього', 
+          testStats.total, 
           'list', 
           '#4285F4',
-          () => navigation.navigate('Tests', { filter: 'available' })
+          () => navigation.navigate('Tests')
         )}
         {renderStatCard(
-          'Завершені', 
+          'Завершено', 
           testStats.completed, 
           'checkmark-circle', 
           '#0F9D58',
           () => navigation.navigate('Tests', { filter: 'completed' })
         )}
         {renderStatCard(
-          'Очікують', 
-          testStats.pending, 
+          'Доступно', 
+          testStats.available, 
           'time', 
           '#F4B400',
-          () => navigation.navigate('Tests', { filter: 'pending' })
+          () => navigation.navigate('Tests', { filter: 'available' })
         )}
       </View>
 
-      <View style={styles.announcementsHeader}>
-        <Text style={styles.sectionTitle}>Останні оголошення</Text>
-        <TouchableOpacity onPress={onRefresh}>
-          <Ionicons name="refresh" size={20} color="#4285F4" />
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Остання активність</Text>
+        <TouchableOpacity onPress={onRefresh} disabled={refreshing}>
+          <Ionicons 
+            name="refresh" 
+            size={20} 
+            color={refreshing ? "#ccc" : "#4285F4"} 
+          />
         </TouchableOpacity>
       </View>
 
       <FlatList
-        data={announcements}
-        renderItem={renderAnnouncementItem}
+        data={recentActivity}
+        renderItem={renderActivityItem}
         keyExtractor={item => item.id}
         style={styles.list}
         showsVerticalScrollIndicator={false}
@@ -255,8 +357,9 @@ const HomeScreen = ({ navigation }) => {
         }
         ListEmptyComponent={
           <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-off" size={50} color="#ccc" />
-            <Text style={styles.emptyText}>Немає оголошень</Text>
+            <Ionicons name="school" size={50} color="#ccc" />
+            <Text style={styles.emptyText}>Немає активності</Text>
+            <Text style={styles.emptySubtext}>Почніть з проходження тестів</Text>
           </View>
         }
       />
@@ -267,44 +370,80 @@ const HomeScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
-    padding: 20,
+    backgroundColor: '#f8f9fa',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#f8f9fa',
+  },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
   },
   header: {
-    marginTop: 10,
-    marginBottom: 20,
+    backgroundColor: '#fff',
+    padding: 20,
+    paddingTop: 50,
+    borderBottomLeftRadius: 20,
+    borderBottomRightRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
   userInfoContainer: {
     flexDirection: 'column',
   },
   greeting: {
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
+    color: '#333',
   },
   userDetails: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#666',
     marginTop: 5,
+  },
+  completeProfileButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: '#FFF8E1',
+    borderRadius: 15,
+    alignSelf: 'flex-start',
+  },
+  completeProfileText: {
+    marginLeft: 5,
+    fontSize: 14,
+    color: '#F4B400',
+    fontWeight: '500',
   },
   statsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 30,
+    margin: 20,
+    marginBottom: 10,
   },
   statItem: {
-    backgroundColor: '#f8f8f8',
+    backgroundColor: '#fff',
     padding: 15,
     borderRadius: 12,
     alignItems: 'center',
     width: '31%',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowRadius: 4,
     elevation: 2,
   },
   statIcon: {
-    marginBottom: 5,
+    marginBottom: 8,
   },
   statNumber: {
     fontSize: 24,
@@ -314,54 +453,62 @@ const styles = StyleSheet.create({
     color: '#666',
     marginTop: 5,
     fontSize: 12,
+    textAlign: 'center',
   },
-  announcementsHeader: {
+  sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginHorizontal: 20,
     marginBottom: 15,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: 'bold',
+    color: '#333',
   },
   list: {
     flex: 1,
+    paddingHorizontal: 20,
   },
-  announcementItem: {
-    backgroundColor: '#f9f9f9',
+  activityItem: {
+    backgroundColor: '#fff',
     padding: 15,
     borderRadius: 12,
-    marginBottom: 12,
+    marginBottom: 10,
     flexDirection: 'row',
+    alignItems: 'center',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 1,
   },
-  announcementIconContainer: {
-    marginRight: 15,
+  activityIconContainer: {
+    width: 45,
+    height: 45,
+    borderRadius: 22,
     justifyContent: 'center',
     alignItems: 'center',
-    width: 40,
+    marginRight: 15,
   },
-  announcementContent: {
+  activityContent: {
     flex: 1,
   },
-  announcementTitle: {
+  activityTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    marginBottom: 5,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
   },
-  announcementDesc: {
+  activityDescription: {
+    fontSize: 14,
     color: '#666',
-    marginBottom: 8,
+    marginBottom: 4,
   },
-  announcementDate: {
-    color: '#999',
+  activityDate: {
     fontSize: 12,
-    textAlign: 'right',
+    color: '#999',
   },
   emptyContainer: {
     flex: 1,
@@ -370,9 +517,15 @@ const styles = StyleSheet.create({
     padding: 50,
   },
   emptyText: {
-    marginTop: 10,
+    marginTop: 15,
     color: '#999',
-    fontSize: 16,
+    fontSize: 18,
+    fontWeight: '500',
+  },
+  emptySubtext: {
+    marginTop: 5,
+    color: '#ccc',
+    fontSize: 14,
   },
 });
 

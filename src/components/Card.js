@@ -1,18 +1,5 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
-
-/**
- * Компонент картки для відображення інформації
- * 
- * @param {Object} props - Властивості компонента
- * @param {string} props.title - Заголовок картки
- * @param {React.ReactNode} props.children - Вміст картки
- * @param {Function} props.onPress - Функція, яка викликається при натисканні (якщо вказана, картка стає натискаємою)
- * @param {Object} props.style - Додаткові стилі для картки
- * @param {Object} props.titleStyle - Додаткові стилі для заголовка
- * @param {React.ReactNode} props.footer - Нижня частина картки
- * @param {React.ReactNode} props.rightComponent - Компонент для відображення справа від заголовка
- */
 const Card = ({ 
   title, 
   children, 
@@ -80,7 +67,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   content: {
-    // Стилі для вмісту картки
   },
   footer: {
     marginTop: 12,

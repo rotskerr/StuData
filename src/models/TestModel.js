@@ -1,15 +1,9 @@
-/**
- * Модель для тестів
- */
-
-// Типи тестів
 export const TEST_TYPES = {
   TEST: 'test',
   SURVEY: 'survey',
   QUIZ: 'quiz',
 };
 
-// Типи питань
 export const QUESTION_TYPES = {
   SINGLE: 'single',
   MULTIPLE: 'multiple',
@@ -18,18 +12,11 @@ export const QUESTION_TYPES = {
   RATING: 'rating',
 };
 
-// Статуси тестів
 export const TEST_STATUSES = {
   DRAFT: 'draft',
   ACTIVE: 'active',
   ARCHIVED: 'archived',
 };
-
-/**
- * Створює новий тест
- * @param {Object} data - Дані тесту
- * @returns {Object} - Об'єкт тесту
- */
 export const createTest = (data = {}) => {
   return {
     id: data.id || generateId(),
@@ -49,12 +36,6 @@ export const createTest = (data = {}) => {
     createdBy: data.createdBy || null,
   };
 };
-
-/**
- * Створює нове питання
- * @param {Object} data - Дані питання
- * @returns {Object} - Об'єкт питання
- */
 export const createQuestion = (data = {}) => {
   return {
     id: data.id || generateId(),
@@ -67,33 +48,16 @@ export const createQuestion = (data = {}) => {
     points: data.points || 1,
   };
 };
-
-/**
- * Створює новий варіант відповіді
- * @param {Object} data - Дані варіанту
- * @returns {Object} - Об'єкт варіанту
- */
 export const createOption = (data = {}) => {
   return {
     id: data.id || generateId(),
     text: data.text || '',
   };
 };
-
-/**
- * Генерує унікальний ID
- * @returns {string} - Унікальний ID
- */
 const generateId = () => {
   return Math.random().toString(36).substring(2, 15) + 
          Math.random().toString(36).substring(2, 15);
 };
-
-/**
- * Валідує тест
- * @param {Object} test - Об'єкт тесту
- * @returns {Object} - Результат валідації {isValid, errors}
- */
 export const validateTest = (test) => {
   const errors = {};
   
@@ -114,12 +78,6 @@ export const validateTest = (test) => {
     errors,
   };
 };
-
-/**
- * Валідує питання
- * @param {Object} question - Об'єкт питання
- * @returns {Object} - Результат валідації {isValid, errors}
- */
 export const validateQuestion = (question) => {
   const errors = {};
   

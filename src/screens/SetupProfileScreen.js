@@ -1,7 +1,8 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView } from 'react-native';
+import React, { useState, useContext, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { saveUserProfile } from '../services/authService';
+import { getFaculties, getSpecialties, getGroups, initializeBasicData } from '../services/facultyService';
 import * as SecureStore from 'expo-secure-store';
 import { NavigationContext } from '../navigation/AppNavigator';
 
@@ -9,17 +10,70 @@ const SetupProfileScreen = ({ navigation }) => {
   const [faculty, setFaculty] = useState('');
   const [specialty, setSpecialty] = useState('');
   const [group, setGroup] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  
+  // Дані з Firebase
+  const [faculties, setFaculties] = useState([]);
+  const [specialties, setSpecialties] = useState([]);
+  const [groups, setGroups] = useState([]);
+  
   const { checkLoginStatus } = useContext(NavigationContext);
 
-  // Приклади факультетів, спеціальностей та груп
-  const faculties = ['Інформаційних технологій', 'Економіки', 'Права', 'Філології'];
-  const specialties = {
-    'Інформаційних технологій': ['Комп\'ютерні науки', 'Кібербезпека', 'Інженерія програмного забезпечення'],
-    'Економіки': ['Фінанси', 'Маркетинг', 'Менеджмент'],
-    'Права': ['Правознавство', 'Міжнародне право'],
-    'Філології': ['Українська мова та література', 'Англійська філологія']
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    if (faculty) {
+      loadSpecialties(faculty);
+    } else {
+      setSpecialties([]);
+      setSpecialty('');
+    }
+  }, [faculty]);
+
+  useEffect(() => {
+    if (specialty) {
+      loadGroups(specialty);
+    } else {
+      setGroups([]);
+      setGroup('');
+    }
+  }, [specialty]);
+
+  const loadInitialData = async () => {
+    setIsLoading(true);
+    try {
+      await initializeBasicData();
+      
+      const facultiesData = await getFaculties();
+      setFaculties(facultiesData);
+    } catch (error) {
+      console.error('Помилка завантаження даних:', error);
+      Alert.alert('Помилка', 'Не вдалося завантажити дані. Спробуйте пізніше.');
+    } finally {
+      setIsLoading(false);
+    }
   };
-  const groups = ['КН-11', 'КН-12', 'КН-21', 'КН-22', 'ІПЗ-11', 'ІПЗ-12'];
+
+  const loadSpecialties = async (facultyId) => {
+    try {
+      const specialtiesData = await getSpecialties(facultyId);
+      setSpecialties(specialtiesData);
+    } catch (error) {
+      console.error('Помилка завантаження спеціальностей:', error);
+    }
+  };
+
+  const loadGroups = async (specialtyId) => {
+    try {
+      const groupsData = await getGroups(specialtyId);
+      setGroups(groupsData);
+    } catch (error) {
+      console.error('Помилка завантаження груп:', error);
+    }
+  };
 
   const handleSaveProfile = async () => {
     if (!faculty || !specialty || !group) {
@@ -27,8 +81,27 @@ const SetupProfileScreen = ({ navigation }) => {
       return;
     }
 
+    setIsSaving(true);
     try {
-      const result = await saveUserProfile(faculty, specialty, group);
+      const facultyName = faculties.find(f => f.id === faculty)?.name || '';
+      const specialtyName = specialties.find(s => s.id === specialty)?.name || '';
+      const groupName = groups.find(g => g.id === group)?.name || '';
+      
+      const profileData = {
+        faculty: facultyName,
+        specialty: specialtyName,
+        group: groupName,
+        facultyId: faculty,
+        specialtyId: specialty,
+        groupId: group,
+        facultyName: facultyName,
+        specialtyName: specialtyName,
+        groupName: groupName,
+        role: 'user'
+      };
+      
+  
+      const result = await saveUserProfile(profileData);
       
       if (result.success) {
         Alert.alert('Успіх', 'Профіль налаштовано успішно!', [
@@ -36,10 +109,11 @@ const SetupProfileScreen = ({ navigation }) => {
             text: 'OK', 
             onPress: async () => {
               try {
-                // Переконуємося, що токен встановлено
-                await SecureStore.setItemAsync('userToken', 'dummy-token');
+                const userToken = await SecureStore.getItemAsync('userToken');
+                if (!userToken) {
+                  await SecureStore.setItemAsync('userToken', result.userId || 'user-token');
+                }
                 
-                // Оновлюємо стан авторизації
                 if (checkLoginStatus) {
                   await checkLoginStatus();
                 }
@@ -53,7 +127,10 @@ const SetupProfileScreen = ({ navigation }) => {
         Alert.alert('Помилка', result.error);
       }
     } catch (error) {
+      console.error('Детальна помилка збереження профілю:', error);
       Alert.alert('Помилка', 'Не вдалося зберегти дані: ' + error.message);
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -63,15 +140,16 @@ const SetupProfileScreen = ({ navigation }) => {
       <ScrollView style={styles.pickerScrollView} nestedScrollEnabled={true}>
         {faculties.map((item) => (
           <TouchableOpacity
-            key={item}
-            style={[styles.pickerItem, faculty === item && styles.pickerItemSelected]}
+            key={item.id}
+            style={[styles.pickerItem, faculty === item.id && styles.pickerItemSelected]}
             onPress={() => {
-              setFaculty(item);
+              setFaculty(item.id);
               setSpecialty('');
+              setGroup('');
             }}
           >
-            <Text style={[styles.pickerItemText, faculty === item && styles.pickerItemTextSelected]}>
-              {item}
+            <Text style={[styles.pickerItemText, faculty === item.id && styles.pickerItemTextSelected]}>
+              {item.name}
             </Text>
           </TouchableOpacity>
         ))}
@@ -79,28 +157,30 @@ const SetupProfileScreen = ({ navigation }) => {
     </View>
   );
 
-  const renderSpecialtyPicker = () => {
-    const items = faculty ? specialties[faculty] || [] : [];
-    
-    return (
-      <View style={styles.pickerContainer}>
-        <Text style={styles.pickerLabel}>Спеціальність:</Text>
-        <ScrollView style={styles.pickerScrollView} nestedScrollEnabled={true}>
-          {items.map((item) => (
-            <TouchableOpacity
-              key={item}
-              style={[styles.pickerItem, specialty === item && styles.pickerItemSelected]}
-              onPress={() => setSpecialty(item)}
-            >
-              <Text style={[styles.pickerItemText, specialty === item && styles.pickerItemTextSelected]}>
-                {item}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-    );
-  };
+  const renderSpecialtyPicker = () => (
+    <View style={styles.pickerContainer}>
+      <Text style={styles.pickerLabel}>Спеціальність:</Text>
+      <ScrollView style={styles.pickerScrollView} nestedScrollEnabled={true}>
+        {specialties.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={[styles.pickerItem, specialty === item.id && styles.pickerItemSelected]}
+            onPress={() => {
+              setSpecialty(item.id);
+              setGroup('');
+            }}
+          >
+            <Text style={[styles.pickerItemText, specialty === item.id && styles.pickerItemTextSelected]}>
+              {item.name}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+      {faculty && specialties.length === 0 && (
+        <Text style={styles.emptyText}>Немає доступних спеціальностей</Text>
+      )}
+    </View>
+  );
 
   const renderGroupPicker = () => (
     <View style={styles.pickerContainer}>
@@ -108,18 +188,31 @@ const SetupProfileScreen = ({ navigation }) => {
       <ScrollView style={styles.pickerScrollView} nestedScrollEnabled={true}>
         {groups.map((item) => (
           <TouchableOpacity
-            key={item}
-            style={[styles.pickerItem, group === item && styles.pickerItemSelected]}
-            onPress={() => setGroup(item)}
+            key={item.id}
+            style={[styles.pickerItem, group === item.id && styles.pickerItemSelected]}
+            onPress={() => setGroup(item.id)}
           >
-            <Text style={[styles.pickerItemText, group === item && styles.pickerItemTextSelected]}>
-              {item}
+            <Text style={[styles.pickerItemText, group === item.id && styles.pickerItemTextSelected]}>
+              {item.name}
             </Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
+      {specialty && groups.length === 0 && (
+        <Text style={styles.emptyText}>Немає доступних груп</Text>
+      )}
     </View>
   );
+
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4285F4" />
+        <Text style={styles.loadingText}>Завантаження даних...</Text>
+        <Text style={styles.loadingSubtext}>Ініціалізація системи</Text>
+      </View>
+    );
+  }
 
   return (
     <ScrollView style={styles.container}>
@@ -135,10 +228,15 @@ const SetupProfileScreen = ({ navigation }) => {
         {renderGroupPicker()}
         
         <TouchableOpacity 
-          style={styles.button} 
+          style={[styles.button, isSaving && styles.buttonDisabled]} 
           onPress={handleSaveProfile}
+          disabled={isSaving}
         >
-          <Text style={styles.buttonText}>Зберегти та продовжити</Text>
+          {isSaving ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Зберегти та продовжити</Text>
+          )}
         </TouchableOpacity>
       </View>
     </ScrollView>
@@ -224,6 +322,30 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4285F4',
+    marginBottom: 10,
+  },
+  loadingSubtext: {
+    fontSize: 16,
+    color: '#666',
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 10,
+  },
+  buttonDisabled: {
+    backgroundColor: '#ccc',
   },
 });
 

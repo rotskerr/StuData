@@ -32,6 +32,41 @@ yarn-error.*
 
 # local env files
 .env*.local
+.env
 
 # typescript
 *.tsbuildinfo
+
+# Firebase
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+firebase-export-*
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+
+# Build artifacts
+build/
+*.tgz
+
+# Firebase config (if contains sensitive data)
+# src/config/firebase.js
+
+# Test coverage
+coverage/
+
+# OS generated files
+Thumbs.db
+ehthumbs.db
